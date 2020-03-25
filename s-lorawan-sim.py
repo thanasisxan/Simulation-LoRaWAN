@@ -27,7 +27,7 @@ class Gateway:
         
         return packet
     
-class endNode:
+class EndNode:
     def __init__(self):
         super().__init__()
         
