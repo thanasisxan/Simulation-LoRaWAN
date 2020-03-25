@@ -32,7 +32,7 @@ class EndNode:
     def __init__(self):
         super().__init__()
 
-    def sendPacket(self, gateway, packet):
+    def sendpacket(self, gateway, packet):
         global channelBusy
         # wait send at next timeslot
         packet = gateway.receivePacket(packet)
