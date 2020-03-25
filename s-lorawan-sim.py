@@ -15,15 +15,15 @@ class Gateway:
     def __init__(self):
         super().__init__()
 
-    def receivePacket(self, packet):
+    def receivepacket(self, packet):
         global channelBusy
 
         if (channelBusy):
             packet.COL = True
         else:
             channelBusy = True
-            # wait rx1 delay+timeslot
-            packet.ACK = True  # packet is aknowledged
+            # wait rx1 delay + timeslot
+            packet.ACK = True  # packet is acknowledged
 
         return packet
 
@@ -36,5 +36,9 @@ class EndNode:
         global channelBusy
         # wait send at next timeslot
         packet = gateway.receivePacket(packet)
-        if (packet.ACK):
+        if packet.ACK:
             channelBusy = False
+            return
+        else:
+            # wait random backoff time and send at next avail timeslot
+            packet = gateway.receivepacket(packet)
