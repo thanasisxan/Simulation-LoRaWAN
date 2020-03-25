@@ -15,6 +15,7 @@ class Gateway:
     def __init__(self):
         super().__init__()
         
+        
     def receivePacket(self, packet):
         global channelBusy
         
