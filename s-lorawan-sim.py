@@ -28,7 +28,7 @@ class Packet:
         self.re_trx_count = 0
 
 
-class LoraGateway(object):
+class LoraGateway:
     def __init__(self, env):
         self.env = env
 
@@ -39,7 +39,7 @@ class LoraGateway(object):
         print("( loraGateway ) Sending ACK for Packet", packet.id, "at:", env.now)
 
 
-class LoraNode(object):
+class LoraNode:
     def __init__(self, env: simpy.Environment, id: int):
         self.env = env
         self.id = id
@@ -83,7 +83,6 @@ class LoraNode(object):
             else:
                 print('Collision!!!--n')
                 yield env.process(self.retransmitpacket(gateway, packet))
-
 
     def retransmitpacket(self, gateway: LoraGateway, packet: Packet):
         rbt = np.random.uniform(0, 10)
