@@ -1,15 +1,15 @@
 import simpy
-from matplotlib.pylab import *
-from numpy.random import RandomState
+import matplotlib.pyplot as plt
+import numpy as np
 
 TIMESLOT = 1  # The timeslot duration
 RX1_DELAY = 0.8
 UPLINK_TIME = 0.9
-ACK_TIME = 0.3
+ACK_TIME = 0.5
 
 MAX_TOTAL_TIMESLOTS = 7200
 
-RNG_SEED = 7589
+RNG_SEED = 25550
 
 total_packets_created = 0
 lora_nodes_created = 0
@@ -73,19 +73,21 @@ class LoraNode:
                 yield env.timeout(UPLINK_TIME)
                 yield env.process(gateway.receivepacket(packet))
                 yield env.timeout(ACK_TIME)
-                if packet.ACK:
-                    print("( loraNode", self.id, ") Received ACK for Packet", packet.id, "at:", env.now)
-                    total_packets_sent += 1
-                    gateway.trx_attempts = 0
-                else:
-                    print('Collision!!!--n')
-                    yield env.process(self.retransmitpacket(gateway, packet))
+                yield channel.release(env)
+                # if packet.ACK:
+                print("( loraNode", self.id, ") Received ACK for Packet", packet.id, "at:", env.now)
+                total_packets_sent += 1
+                gateway.trx_attempts = 0
+                # else:
+                #     print('Collision!!!--n')
+                #     yield env.process(self.retransmitpacket(gateway, packet))
             else:
                 print('Collision!!!--n')
+                yield channel.release(env)
                 yield env.process(self.retransmitpacket(gateway, packet))
 
     def retransmitpacket(self, gateway: LoraGateway, packet: Packet):
-        rbt = np.random.uniform(0, 10)
+        rbt = np.random.uniform(0, 15)
         print("( loraNode", self.id, ") Random Backoff Time:", rbt, "for Packet", packet.id)
         packet.re_trx_count += 1
         if packet.re_trx_count > 3:
@@ -96,7 +98,7 @@ class LoraNode:
             yield env.process(self.sendpacket(gateway, packet))
 
 
-def source(env: simpy.Environment, channel, prng=RandomState(0)):
+def source(env: simpy.Environment, channel, prng=np.random.RandomState(0)):
     global total_packets_created
     global lora_nodes_created
 
@@ -131,13 +133,14 @@ def source(env: simpy.Environment, channel, prng=RandomState(0)):
 
 env = simpy.Environment()
 channel = simpy.Resource(env, 1)
-prng = RandomState(RNG_SEED)
+prng = np.random.RandomState(RNG_SEED)
 
 l_gw = LoraGateway(env)
 
+
 for _ in range(24):
-    env.timeout(5)
     env.process(source(env, channel, prng))
+
 
 # Run the simulation
 env.run(until=MAX_TOTAL_TIMESLOTS)
@@ -149,5 +152,5 @@ print("Total timeslots:", MAX_TOTAL_TIMESLOTS)
 print("G - traffic load:", total_packets_created / MAX_TOTAL_TIMESLOTS)
 print("S(G) - throughput:", total_packets_sent / MAX_TOTAL_TIMESLOTS)
 
-plot(G, S)
-show()
+plt.plot(G, S)
+plt.show()
