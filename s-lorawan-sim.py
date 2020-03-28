@@ -3,13 +3,13 @@ from matplotlib.pylab import *
 from numpy.random import RandomState
 
 TIMESLOT = 1  # The timeslot duration
-RX1_DELAY = 0.7
+RX1_DELAY = 0.8
 UPLINK_TIME = 0.9
-ACK_TIME = 0.4
+ACK_TIME = 0.3
 
 MAX_TOTAL_TIMESLOTS = 7200
 
-RNG_SEED = 25550
+RNG_SEED = 7589
 
 total_packets_created = 0
 lora_nodes_created = 0
@@ -137,6 +137,7 @@ prng = RandomState(RNG_SEED)
 l_gw = LoraGateway(env)
 
 for _ in range(24):
+    env.timeout(5)
     env.process(source(env, channel, prng))
 
 # Run the simulation
