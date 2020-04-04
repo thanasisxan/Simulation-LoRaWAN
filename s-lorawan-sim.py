@@ -174,5 +174,13 @@ print("Lora nodes:", lora_nodes_created)
 print("G - traffic load:", total_packets_created / MAX_TOTAL_TIMESLOTS)
 print("MAX S(G) - throughput:", max(S))
 
-plt.plot(G, S, ':')
+if SLOTTED_ALOHA:
+    plt.plot(G, S, 'r:')
+    plt.title("Slotted LoRaWAN Protocol")
+else:
+    plt.plot(G, S, 'b:')
+    plt.title("LoRaWAN Protocol")
+
+plt.xlabel("G - traffic load")
+plt.ylabel("S(G) - throughput")
 plt.show()
