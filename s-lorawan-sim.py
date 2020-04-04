@@ -9,10 +9,10 @@ RX1_DELAY = 0.85  # rx1 Delay before waiting for receiving Acknowledgement(downl
 UPLINK_TIME = 1  # Time for the payload
 ACK_TIME = 0.2  # ACK packet time of air
 
-SLOTTED_ALOHA = True
-# SLOTTED_ALOHA = False
+# SLOTTED_ALOHA = True
+SLOTTED_ALOHA = False
 
-MAX_TOTAL_TIMESLOTS = 500000 * TIMESLOT
+MAX_TOTAL_TIMESLOTS = 10000 * TIMESLOT
 
 total_packets_created = 0
 lora_nodes_created = 0
@@ -23,7 +23,8 @@ G = [0]  # Traffic load
 S = [0]  # Throughput
 P_success = 0  # chance of successfully transmitting a packet
 
-np.random.seed(2392)  # keep only for getting the same results-no randomness in each run
+
+# np.random.seed(2392)  # keep only for getting the same results-no randomness in each run
 
 
 class Packet:
@@ -34,7 +35,7 @@ class Packet:
 
 
 class LoraGateway:
-    def __init__(self, env):
+    def __init__(self, env: simpy.Environment):
         self.env = env
 
     def receivepacket(self, packet: Packet):
@@ -92,7 +93,7 @@ class LoraNode:
         yield channel.release(req)  # channel is free after transmission or retransmission backoff time
 
     def retransmitpacket(self, gateway: LoraGateway, packet: Packet):
-        RandomBackoffTime = np.random.uniform(0, 40)  # wait random amount of time between 0 and 15
+        RandomBackoffTime = np.random.uniform(0, 20)  # wait random amount of time between 0 and 15
         print("( loraNode", self.id, ") Random Backoff Time:", RandomBackoffTime, "for Packet", packet.id)
         packet.re_trx_count += 1
         if packet.re_trx_count > 10:
@@ -103,7 +104,7 @@ class LoraNode:
             yield env.process(self.sendpacket(gateway, packet))
 
 
-def loranode_process(env: simpy.Environment, channel):
+def loranode_process(env: simpy.Environment, channel: simpy.Resource):
     global total_packets_created
     global lora_nodes_created
 
@@ -114,7 +115,6 @@ def loranode_process(env: simpy.Environment, channel):
 
     current_lnode = LoraNode(env, channel, lora_nodes_created)
     lora_nodes_created += 1
-    # while True:
     while max(G) < 3 and lora_nodes_created <= 1000:
         # L is λ, the arrival rate in Poisson process
         # infrequent packet generation on Lora networks(0.05 packets per timeslot)
@@ -147,7 +147,7 @@ def wait_next_timeslot(env: simpy.Environment):
         return env.timeout(0)
 
 
-def setup(env):
+def setup(env: simpy.Environment):
     global G
     global lora_nodes_created
 
