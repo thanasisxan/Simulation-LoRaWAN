@@ -23,7 +23,7 @@ G = [0]  # Traffic load
 S = [0]  # Throughput
 P_success = 0  # chance of successfully transmitting a packet
 
-np.random.seed(2392)
+np.random.seed(2392)  # keep only for getting the same results-no randomness in each run
 
 
 class Packet:
