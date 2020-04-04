@@ -9,8 +9,8 @@ RX1_DELAY = 0.85  # rx1 Delay before waiting for receiving Acknowledgement(downl
 UPLINK_TIME = 1  # Time for the payload
 ACK_TIME = 0.2  # ACK packet time of air
 
-# SLOTTED_ALOHA = True
-SLOTTED_ALOHA = False
+SLOTTED_ALOHA = True
+# SLOTTED_ALOHA = False
 
 MAX_TOTAL_TIMESLOTS = 10000 * TIMESLOT
 
@@ -24,7 +24,7 @@ S = [0]  # Throughput
 P_success = 0  # chance of successfully transmitting a packet
 
 
-# np.random.seed(2392)  # keep only for getting the same results-no randomness in each run
+np.random.seed(2392)  # keep only for getting the same results-no randomness in each run
 
 
 class Packet:
@@ -93,7 +93,7 @@ class LoraNode:
         yield channel.release(req)  # channel is free after transmission or retransmission backoff time
 
     def retransmitpacket(self, gateway: LoraGateway, packet: Packet):
-        RandomBackoffTime = np.random.uniform(0, 20)  # wait random amount of time between 0 and 15
+        RandomBackoffTime = np.random.uniform(0, 40)  # wait random amount of time between 0 and 15
         print("( loraNode", self.id, ") Random Backoff Time:", RandomBackoffTime, "for Packet", packet.id)
         packet.re_trx_count += 1
         if packet.re_trx_count > 10:
@@ -171,7 +171,7 @@ print("Packets created: ", total_packets_created)
 print("Packets sent:", total_packets_sent)
 print("Lora nodes:", lora_nodes_created)
 
-print("G - traffic load:", total_packets_created / MAX_TOTAL_TIMESLOTS)
+print("Last G - traffic load:", G[-1])
 print("MAX S(G) - throughput:", max(S))
 
 if SLOTTED_ALOHA:
