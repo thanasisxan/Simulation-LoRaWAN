@@ -24,7 +24,7 @@ S = [0]  # Throughput
 P_success = 0  # chance of successfully transmitting a packet
 
 
-# np.random.seed(2392)  # keep only for getting the same results-no randomness in each run
+np.random.seed(2392)  # keep only for getting the same results-no randomness in each run
 
 
 class Packet:
@@ -93,7 +93,7 @@ class LoraNode:
         yield channel.release(req)  # channel is free after transmission or retransmission backoff time
 
     def retransmitpacket(self, gateway: LoraGateway, packet: Packet):
-        RandomBackoffTime = np.random.uniform(1, 15)  # wait random amount of time between 1 and 15
+        RandomBackoffTime = np.random.uniform(1, 25)  # wait random amount of time between 1 and 15
         print("( loraNode", self.id, ") Random Backoff Time:", RandomBackoffTime, "for Packet", packet.id)
         packet.re_trx_count += 1
         if packet.re_trx_count > 4:
