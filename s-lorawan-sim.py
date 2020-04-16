@@ -2,8 +2,6 @@ import simpy
 import matplotlib.pyplot as plt
 import numpy as np
 
-# from scipy import interpolate
-
 TIMESLOT = 1  # The timeslot duration
 RX1_DELAY = 0.85  # rx1 Delay before waiting for receiving Acknowledgement(downlink)
 UPLINK_TIME = 1  # Time for the payload
@@ -12,7 +10,7 @@ ACK_TIME = 0.2  # ACK packet time of air
 SLOTTED_ALOHA = True
 # SLOTTED_ALOHA = False
 
-MAX_TOTAL_TIMESLOTS = 7200 * TIMESLOT
+MAX_TOTAL_TIMESLOTS = 14400 * TIMESLOT
 
 total_packets_created = 0
 lora_nodes_created = 0
@@ -22,7 +20,6 @@ trx_attempts = 0
 G = [0.001]  # Traffic load
 S = [0]  # Throughput
 P_success = 0  # chance of successfully transmitting a packet
-
 
 np.random.seed(2392)  # keep only for getting the same results-no randomness in each run
 
@@ -93,10 +90,10 @@ class LoraNode:
         yield channel.release(req)  # channel is free after transmission or retransmission backoff time
 
     def retransmitpacket(self, gateway: LoraGateway, packet: Packet):
-        RandomBackoffTime = np.random.uniform(1, 25)  # wait random amount of time between 1 and 15
+        RandomBackoffTime = np.random.uniform(1, 15)  # wait random amount of time between 1 and 15
         print("( loraNode", self.id, ") Random Backoff Time:", RandomBackoffTime, "for Packet", packet.id)
         packet.re_trx_count += 1
-        if packet.re_trx_count > 4:
+        if packet.re_trx_count > 10:
             print("Maximum retransmissions for Packet", packet.id, "from ( loraNode", packet.owner, " )")
             return
         else:
@@ -115,16 +112,12 @@ def loranode_process(env: simpy.Environment, channel: simpy.Resource):
 
     current_lnode = LoraNode(env, channel, lora_nodes_created)
     lora_nodes_created += 1
-    while max(G) < 3.5 and lora_nodes_created <= 1000:
-    # while True:
+    while max(G) < 3.5 and lora_nodes_created < 1000:
         # L is λ, the arrival rate in Poisson process
-        # infrequent packet generation on Lora networks(0.05 packets per timeslot)
-        L = 0.05
-        # L = G[-1]
-        P_arrival = L * np.exp(-L)
-        # print("P arrival:", P_arrival)
+        # packet generation on Lora networks based on traffic load (G)
+        L = G[-1]
+        P_arrival = np.exp(-L) * L
         P_transmit = np.random.random()
-        # print("P transmit:", P_transmit)
         if P_transmit <= P_arrival:
             pkt = Packet(total_packets_created)
             pkt.owner = current_lnode.id
@@ -144,39 +137,45 @@ def loranode_process(env: simpy.Environment, channel: simpy.Resource):
 def wait_next_timeslot(env: simpy.Environment):
     if SLOTTED_ALOHA:
         # wait for the start of the next timeslot
-        return env.timeout(TIMESLOT - (env.now % 1))
+        # return env.timeout(TIMESLOT - (env.now % 1))
+        # print(TIMESLOT - (env.now % 1))
+        return env.timeout(((env.now // 1 + 1) * TIMESLOT) - env.now)
     else:
         # PURE ALOHA transmit immediately
         return env.timeout(0)
 
 
+# The core of the simulation, here new lora nodes are generated based on traffic load
+# each node spawns its own process with independent packet generation adn transmission
 def setup(env: simpy.Environment):
     global G
     global lora_nodes_created
 
-    # yield env.timeout(10)  # start at 10 to eliminate low env.now number bug at statistics calculation
     yield env.timeout(10)  # start at 10 to eliminate low env.now number bug at statistics calculation
     env.process(loranode_process(env, channel))
-    while max(G) < 3.5 and lora_nodes_created <= 1000:
-    # while True:
+    while max(G) < 3.5 and lora_nodes_created < 1000:
+        # while True:
         # print("\n\n\n------====== Creating a new LoRa Node ======------\n\n\n")
         env.process(loranode_process(env, channel))
-        yield env.timeout(10)
+        yield env.timeout(100)
 
 
 env = simpy.Environment()
+
+# The channel is modeled as a shared resource with capacity=1,
+# as only one channel exists in our simulation which all nodes want to access when transmitting
 channel = simpy.Resource(env, 1)
+
 l_gw = LoraGateway(env)
 
 env.process(setup(env))
-
 env.run(until=MAX_TOTAL_TIMESLOTS)
 
 print("Packets created: ", total_packets_created)
 print("Packets sent:", total_packets_sent)
 print("Lora nodes:", lora_nodes_created)
 
-print("Last G - traffic load:", G[-1])
+print("Mean G - traffic load:", np.mean(G))
 print("MAX S(G) - throughput:", max(S))
 
 if SLOTTED_ALOHA:
