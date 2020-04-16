@@ -127,9 +127,6 @@ def loranode_process(env: simpy.Environment, channel: simpy.Resource):
             G.append(trx_attempts / ((env.now + 0.000001) / UPLINK_TIME))  # +0.000001 to avoid division by zero
             P_success = total_packets_sent / total_packets_created
             S.append(G[-1] * P_success)
-            # print("G - traffic load:", G[-1])
-            # print("S(G) - throughput:", S[-1])
-            # print("loraNodes:", lora_nodes_created)
         else:
             yield wait_next_timeslot(env)
 
@@ -137,8 +134,6 @@ def loranode_process(env: simpy.Environment, channel: simpy.Resource):
 def wait_next_timeslot(env: simpy.Environment):
     if SLOTTED_ALOHA:
         # wait for the start of the next timeslot
-        # return env.timeout(TIMESLOT - (env.now % 1))
-        # print(TIMESLOT - (env.now % 1))
         return env.timeout(((env.now // 1 + 1) * TIMESLOT) - env.now)
     else:
         # PURE ALOHA transmit immediately
