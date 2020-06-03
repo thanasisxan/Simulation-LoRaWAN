@@ -2,6 +2,10 @@ import simpy
 import matplotlib.pyplot as plt
 import numpy as np
 
+from backoff_utils import strategies
+
+# Using a Function Call
+from backoff_utils import backoff
 
 TIMESLOT = 1  # The timeslot duration
 RX1_DELAY = 0.85  # rx1 Delay before waiting for receiving Acknowledgement(downlink)
@@ -91,14 +95,16 @@ class LoraNode:
         yield channel.release(req)  # channel is free after transmission or retransmission backoff time
 
     def retransmitpacket(self, gateway: LoraGateway, packet: Packet):
-        RandomBackoffTime = np.random.uniform(1, 15)  # wait random amount of time between 1 and 15
-        print("( loraNode", self.id, ") Random Backoff Time:", RandomBackoffTime, "for Packet", packet.id)
+        # calculate random amount of time between 1 and 2^N, where N is the number of collisions
+        BEB_BackoffTime = np.random.uniform(0, 2 ** packet.re_trx_count - 1)
         packet.re_trx_count += 1
-        if packet.re_trx_count > 10:
+        print("( loraNode", self.id, ") Random BEB_BackoffTime:", BEB_BackoffTime, "for Packet", packet.id, "(",
+              packet.re_trx_count, " collisions so far )")
+        if packet.re_trx_count > 8:
             print("Maximum retransmissions for Packet", packet.id, "from ( loraNode", packet.owner, " )")
             return
         else:
-            yield env.timeout(RandomBackoffTime)
+            yield env.timeout(BEB_BackoffTime)
             yield env.process(self.sendpacket(gateway, packet))
 
 
@@ -181,7 +187,7 @@ print("MAX S(G) - throughput:", max(S))
 
 if SLOTTED_ALOHA:
     plt.plot(G, S, 'r:')
-    plt.title("Slotted LoRaWAN Protocol")
+    plt.title("Slotted LoRaWAN Protocol - Binary Exponential Backoff")
 else:
     plt.plot(G, S, 'b:')
     plt.title("LoRaWAN Protocol")
