@@ -4,7 +4,7 @@ import numpy as np
 import queue
 
 TIMESLOT = 1  # The timeslot duration
-RX1_DELAY = 0.85  # rx1 Delay before waiting for receiving Acknowledgement(downlink)
+RX1_DELAY = 0.95  # rx1 Delay before waiting for receiving Acknowledgement(downlink)
 UPLINK_TIME = 1  # Time for the payload
 ACK_TIME = 0.2  # ACK packet time of air
 
@@ -149,18 +149,13 @@ class LoraNode:
                       packet.owner, ") at timeslot:", self.env.now)
 
         trx_attempts += 1
-        # req = channel.request()  # request the channel in order to transmit
-        # results = yield req | self.env.timeout(0)  # check if channel is busy
 
-        # if req in results:
-        # packet.trx_start_time = env.now
-        # print("Packet", packet.id, "trx time:", packet.trx_start_time)
         Nodes_col_flag[self.id] = 1
-        env.timeout(UPLINK_TIME)  # time to transmit the payload
-        self.env.process(gateway.receivepacket(packet, self))  # there is a timeout(RX1_DELAY) at receivepacket
-        # if not gateway.collision_GW:
+        yield self.env.timeout(UPLINK_TIME)  # time to transmit the payload
+        yield self.env.process(gateway.receivepacket(packet, self))  # there is a timeout(RX1_DELAY) at receivepacket
+
         if sum(Nodes_col_flag) < 2:
-            env.timeout(ACK_TIME)  # time to complete the reception of Acknowledgment(Downlink)
+            yield self.env.timeout(ACK_TIME)  # time to complete the reception of Acknowledgment(Downlink)
             Nodes_col_flag[self.id] = 0
             total_packets_sent += 1
             print("( loraNode", self.id, ") Received ACK for Packet", packet.id, "at:", self.env.now)
@@ -193,7 +188,6 @@ class LoraNode:
 
         else:
             print('Collision!!!--n')
-            # gateway.collision_GW = False
             Nodes_col_flag[self.id] = 0
             yield self.env.process(self.retransmitpacket(gateway, packet))
 
@@ -275,9 +269,8 @@ def loranode_creation_and_arrival_process(env: simpy.Environment, channel: simpy
     _arrival_time = 0
     while True:
         # L is λ, the arrival rate in Poisson process
-        # packet generation on Lora networks based on traffic load (G)
         # L = G[-1]
-        L = 0.01
+        L = 10/3000
         P_arrival = np.random.exponential(L)
         P_q_add = np.random.random()
         # print(Nodes_col_flag)
@@ -296,7 +289,7 @@ def loranode_creation_and_arrival_process(env: simpy.Environment, channel: simpy
             pkt.owner = current_lnode.id
             total_packets_created += 1
             pkt.arrival_time = env.now
-            env.process(current_lnode.sendpacket(l_gw, pkt))
+            yield env.process(current_lnode.sendpacket(l_gw, pkt))
             # statistics calculation
             # G.append(trx_attempts / (env.now / UPLINK_TIME))
             G.append(trx_attempts / (env.now / UPLINK_TIME))
