@@ -1,6 +1,5 @@
 import simpy
 import numpy as np
-import matplotlib.pyplot as plt
 import queue
 
 TIMESLOT = 1  # The timeslot duration
@@ -22,8 +21,8 @@ EIED = False  # Exponential Increase Exponential Decrease
 ASB = False  # Adaptively Scaled Backoff strategy
 
 # Universal Backoff parameters
-maxR = 10
-maxB = 5
+maxR = 6
+maxB = 6
 CW_min = 2
 CW_max = 1023
 r_d = np.sqrt(2)
@@ -107,73 +106,80 @@ class LoraNode:
         self.last_transmission_time = 0
         self.queue = queue.Queue(Q)
 
-    def sendpacket(self, gateway: LoraGateway, packet: Packet):
+    def sendpacket(self, gateway: LoraGateway):
         global total_packets_sent
         global trx_attempts
         global Nodes_col_flag
         global total_delay
 
-        if packet.re_trx_count == 0:
-            print("( loraNode", self.id, ") Packet", packet.id, "created at:", self.env.now, "from ( loraNode",
-                  packet.owner,
-                  ")")
-        if self.env.now % 1 == 0:
+        if not self.queue.empty():
+            # Get packet for transmission without removing it from the queue
+            packet=self.queue.queue[0]
+
             if packet.re_trx_count == 0:
-                print("( loraNode", self.id, ") The Packet", packet.id, "from ( loraNode", packet.owner,
-                      ") arrived exactly at the start of a timeslot, transmitting at:", self.env.now)
-        else:
-            # The packet didn't arrive at the start of a timeslot,
-            # attempt to transmit at the start of the next timeslot
-            yield wait_next_timeslot(self.env)
-            if packet.re_trx_count == 0:
-                print("( loraNode", self.id, ") Attempt to transmit Packet", packet.id, "from ( loraNode", packet.owner,
-                      ") at timeslot:", self.env.now)
+                print("( loraNode", self.id, ") Packet", packet.id, "created at:", self.env.now, "from ( loraNode",
+                      packet.owner,
+                      ")")
+            if self.env.now % 1 == 0:
+                if packet.re_trx_count == 0:
+                    print("( loraNode", self.id, ") The Packet", packet.id, "from ( loraNode", packet.owner,
+                          ") arrived exactly at the start of a timeslot, transmitting at:", self.env.now)
             else:
-                print("( loraNode", self.id, ") Retransmitting Packet", packet.id, "from ( loraNode",
-                      packet.owner, ") at timeslot:", self.env.now)
+                # The packet didn't arrive at the start of a timeslot,
+                # attempt to transmit at the start of the next timeslot
+                yield wait_next_timeslot(self.env)
+                if packet.re_trx_count == 0:
+                    print("( loraNode", self.id, ") Attempt to transmit Packet", packet.id, "from ( loraNode", packet.owner,
+                          ") at timeslot:", self.env.now)
+                else:
+                    print("( loraNode", self.id, ") Retransmitting Packet", packet.id, "from ( loraNode",
+                          packet.owner, ") at timeslot:", self.env.now)
 
-        trx_attempts += 1
+            trx_attempts += 1
 
-        Nodes_col_flag[self.id] = 1
-        yield self.env.timeout(UPLINK_TIME)  # time to transmit the payload
-        yield self.env.process(gateway.receivepacket(packet, self))  # there is a timeout(RX1_DELAY) at receivepacket
+            Nodes_col_flag[self.id] = 1
+            yield self.env.timeout(UPLINK_TIME)  # time to transmit the payload
+            yield self.env.process(gateway.receivepacket(packet, self))  # there is a timeout(RX1_DELAY) at receivepacket
 
-        if sum(Nodes_col_flag) < 2:
-            yield self.env.timeout(ACK_TIME)  # time to complete the reception of Acknowledgment(Downlink)
-            Nodes_col_flag[self.id] = 0
-            total_packets_sent += 1
-            print("( loraNode", self.id, ") Received ACK for Packet", packet.id, "at:", self.env.now)
-            packet.trx_finish_time = self.env.now
-            print("Packet", packet.id, "finish trx time:", packet.trx_finish_time)
-            total_delay = total_delay + (packet.trx_finish_time - packet.arrival_time)
-            print("Delay for packet", packet.id, ":", packet.trx_finish_time - packet.arrival_time)
-            self.r = 0
-            self.s = 0
-            self.S_factor = 1
-            self.f_b = 0
-            self.f_c = 0
-            if BEB:
-                self.CW = CW_min
-                self.k = np.random.uniform(0, self.CW)
-            elif ECA:
-                self.k = CW_min / 2 - 1
-            elif EIED:
-                self.CW = min((self.CW / r_d), CW_max)
-                self.k = np.random.uniform(0, self.CW)
-            elif ASB:
-                self.CW = CW_min
-                self.k = np.random.uniform(0, self.CW)
-            elif EFB:
-                self.CW = max(previousFibonacci(self.CW), CW_min)
-                self.k = np.random.uniform(0, self.CW)
-            elif EBEB:
-                if not self.CW < (1 / np.sqrt(CW_min)) * CW_max:
-                    self.CW = self.CW + (CW_max / self.CW) * CW_min
+            if sum(Nodes_col_flag) < 2:
+                # Successful transmission
+                yield self.env.timeout(ACK_TIME)  # time to complete the reception of Acknowledgment(Downlink)
+                self.queue.get()
+                print("Q length:",self.queue.qsize())
+                Nodes_col_flag[self.id] = 0
+                total_packets_sent += 1
+                print("( loraNode", self.id, ") Received ACK for Packet", packet.id, "at:", self.env.now)
+                packet.trx_finish_time = self.env.now
+                print("Packet", packet.id, "finish trx time:", packet.trx_finish_time)
+                total_delay = total_delay + (packet.trx_finish_time - packet.arrival_time)
+                print("Delay for packet", packet.id, ":", packet.trx_finish_time - packet.arrival_time)
+                self.r = 0
+                self.s = 0
+                self.S_factor = 1
+                self.f_b = 0
+                self.f_c = 0
+                if BEB:
+                    self.CW = CW_min
+                    self.k = np.random.uniform(0, self.CW)
+                elif ECA:
+                    self.k = CW_min / 2 - 1
+                elif EIED:
+                    self.CW = min((self.CW / r_d), CW_max)
+                    self.k = np.random.uniform(0, self.CW)
+                elif ASB:
+                    self.CW = CW_min
+                    self.k = np.random.uniform(0, self.CW)
+                elif EFB:
+                    self.CW = max(previousFibonacci(self.CW), CW_min)
+                    self.k = np.random.uniform(0, self.CW)
+                elif EBEB:
+                    if not self.CW < (1 / np.sqrt(CW_min)) * CW_max:
+                        self.CW = self.CW + (CW_max / self.CW) * CW_min
 
-        else:
-            print('Collision!!!--n')
-            Nodes_col_flag[self.id] = 0
-            yield self.env.process(self.retransmitpacket(gateway, packet))
+            else:
+                print('Collision!!!--n')
+                Nodes_col_flag[self.id] = 0
+                yield self.env.process(self.retransmitpacket(gateway, packet))
 
     def retransmitpacket(self, gateway: LoraGateway, packet: Packet):
         packet.re_trx_count += 1
@@ -181,6 +187,8 @@ class LoraNode:
         self.s = min(self.s + 1, maxB)
         self.r = self.r + 1
         self.f_c = 1
+
+        print("Q length:",self.queue.qsize())
 
         if BEB:
             self.CW = min(2 ** self.s + 1, CW_max)
@@ -211,12 +219,11 @@ class LoraNode:
             print("( loraNode", self.id, ") Backoff_Time:", self.k, "for Packet", packet.id, "(",
                   packet.re_trx_count, " collisions so far for this packet )")
             yield self.env.timeout(self.k)
-            yield self.env.process(self.sendpacket(gateway, packet))
+            yield self.env.process(self.sendpacket(gateway))
 
 
-def loranode_creation_and_arrival_process(env: simpy.Environment):
+def loranode_arrival_process(env: simpy.Environment, current_lnode: LoraNode):
     global total_packets_created
-    global lora_nodes_created
     global Nodes_col_flag
 
     global G
@@ -224,12 +231,10 @@ def loranode_creation_and_arrival_process(env: simpy.Environment):
     global P_success
     global trx_attempts
 
-    current_lnode = LoraNode(env, lora_nodes_created)
-    lora_nodes_created += 1
-
     while True:
+        # yield env.timeout(0.1)
         # L is λ, the arrival rate in Poisson process
-        L = 10 / 3000
+        L = 1 / 3000
         P_arrival = np.random.exponential(L)
         P_q_add = np.random.random()
 
@@ -238,7 +243,10 @@ def loranode_creation_and_arrival_process(env: simpy.Environment):
             pkt.owner = current_lnode.id
             total_packets_created += 1
             pkt.arrival_time = env.now
-            yield env.process(current_lnode.sendpacket(l_gw, pkt))
+
+            current_lnode.queue.put(pkt)
+            # yield env.process(current_lnode.sendpacket(l_gw, pkt))
+
             # statistics calculation
             G.append(trx_attempts / (env.now / UPLINK_TIME))
             # G.append(total_packets_created / (env.now / UPLINK_TIME))
@@ -255,6 +263,15 @@ def loranode_creation_and_arrival_process(env: simpy.Environment):
                 yield env.timeout(5)
 
 
+def loranode_transmit_process(env: simpy.Environment, current_lnode: LoraNode):
+    while True:
+        yield env.timeout(np.random.random())
+        if not current_lnode.queue.empty():
+            yield env.process(current_lnode.sendpacket(l_gw))
+        # yield env.timeout(3)
+        # print("\n\n=================", current_lnode.id,"\n\n")
+
+
 def wait_next_timeslot(env: simpy.Environment):
     if SLOTTED_ALOHA:
         # wait for the start of the next timeslot
@@ -264,6 +281,9 @@ def wait_next_timeslot(env: simpy.Environment):
         return env.timeout(0)
 
 
+loraNodes = []
+
+
 def setup(env: simpy.Environment):
     global G
     global lora_nodes_created
@@ -271,12 +291,14 @@ def setup(env: simpy.Environment):
     yield env.timeout(1)  # start at 1 to eliminate low env.now number bug at statistics calculation
     for _ in range(TOTAL_LORA_ENDNODES):
         print("\n\n\n------====== Creating a new LoRa Node ======------\n\n\n")
-        env.process(loranode_creation_and_arrival_process(env))
-
+        lnode = LoraNode(env, lora_nodes_created)
+        lora_nodes_created += 1
+        loraNodes.append(lnode)
+        env.process(loranode_arrival_process(env, lnode))
+        env.process(loranode_transmit_process(env, lnode))
 
 
 env = simpy.Environment()
-
 
 l_gw = LoraGateway(env)
 
@@ -298,4 +320,3 @@ print("Traffic load (packets created/slot):", total_packets_created / MAX_TOTAL_
 print("Throughput (packets sent/slot):", total_packets_sent / MAX_TOTAL_TIMESLOTS)
 print("Total delay:", total_delay)
 print("Avg. delay:", total_delay / total_packets_sent)
-
