@@ -3,8 +3,9 @@ import numpy as np
 import queue
 import random
 
+
 TIMESLOT = 1  # The timeslot duration
-RX1_DELAY = 0.3  # rx1 Delay before waiting for receiving Acknowledgement(downlink)
+RX1_DELAY = 0.35  # rx1 Delay before waiting for receiving Acknowledgement(downlink)
 UPLINK_TIME = 0.5  # Time for the payload
 ACK_TIME = 0.15  # ACK packet time of air
 
@@ -22,15 +23,15 @@ EIED = False  # Exponential Increase Exponential Decrease
 ASB = False  # Adaptively Scaled Backoff strategy
 
 # Universal Backoff parameters
-maxR = 7
-maxB = 6
+maxR = 6
+maxB = 5
 CW_min = 2
 CW_max = 1023
 r_d = np.sqrt(2)
 r_1 = 2
 
 Q = 5  # Queue length
-L = 9 / 3000  # Poisson Arrival rate
+L = 10 / 3000  # Poisson Arrival rate
 MAX_TOTAL_TIMESLOTS = 14400 * TIMESLOT
 TOTAL_LORA_ENDNODES = 300
 
@@ -68,6 +69,7 @@ class Packet:
         self.re_trx_count = 0
         self.arrival_time = 0
         self.trx_finish_time = 0
+        self.gw_sent_ack = False
 
 
 class LoraGateway:
@@ -90,10 +92,12 @@ class LoraGateway:
                   ") at:", self.env.now)
             GW_col_flag[from_node.id] = 0
             Nodes_col_flag[from_node.id] = 0
+            packet.gw_sent_ack = True
         else:
             print("Collision (gw)")
             Nodes_col_flag[from_node.id] = 1
             GW_col_flag[from_node.id] = 1
+            packet.gw_sent_ack = False
             # collision flag
 
 
@@ -119,7 +123,13 @@ class LoraNode:
         global Nodes_col_flag
         global GW_col_flag
         global total_delay
-        global col_gw
+        global CW_min
+        global CW_max
+        global r_d
+        global r_1
+        global lora_nodes_created
+        global maxB
+        global maxR
 
         if not self.queue.empty():
             # Get packet for transmission without removing it from the queue
@@ -152,7 +162,7 @@ class LoraNode:
             GW_col_flag[self.id] = 1
             yield self.env.process(gateway.receivepacket(packet, self))  # timeout(RX1_DELAY) at receivepacket (GW)
 
-            if sum(Nodes_col_flag) < 2 and sum(GW_col_flag) < 2:
+            if sum(Nodes_col_flag) < 2 and sum(GW_col_flag) < 2 and packet.gw_sent_ack:
                 # Successful transmission
                 yield self.env.timeout(ACK_TIME)  # time to complete the reception of Acknowledgment(Downlink)
                 self.queue.get()
@@ -195,19 +205,28 @@ class LoraNode:
                 yield self.env.process(self.retransmitpacket(gateway, packet))
 
     def retransmitpacket(self, gateway: LoraGateway, packet: Packet):
+        global CW_min
+        global CW_max
+        global r_d
+        global r_1
+        global lora_nodes_created
+        global maxB
+        global maxR
+
         packet.re_trx_count += 1
         n = lora_nodes_created
-        self.s = min(self.s + 1, maxB)
+        # self.s = min(self.s + 1, maxB)
+        self.s = self.s + 1
         self.r = self.r + 1
         self.f_c = 1
 
         # print("Q length:", self.queue.qsize())
 
         if BEB:
-            self.CW = min(2 ** self.s + 1, CW_max)
+            self.CW = min(2 ** (self.s + 1), CW_max)
         elif ECA:
             # on collision ECA backoff time is equal to that Binary Exponential Backoff strategy
-            self.CW = min(2 ** self.s + 1, CW_max)
+            self.CW = min(2 ** (self.s + 1), CW_max)
         elif EIED:
             self.CW = min(r_1 * CW_min - 1, CW_max)
         elif ASB:
@@ -221,16 +240,17 @@ class LoraNode:
             self.CW = min(2 ** self.s + 1, CW_max)
         else:
             self.CW = min(np.random.uniform(0, 15), CW_max)
-        self.k = np.random.uniform(0, self.CW)
 
+        self.k = np.random.uniform(0, self.CW)
         if packet.re_trx_count > maxR:
             print("Maximum retransmissions for Packet", packet.id, "from ( loraNode", packet.owner, " )")
             print("Dropping packet...")
-            self.CW = CW_min
+            # self.CW = CW_min
             return
         else:
             print("( loraNode", self.id, ") Backoff_Time:", self.k, "for Packet", packet.id, "(",
-                  packet.re_trx_count, " collisions so far for this packet )")
+                  packet.re_trx_count, "collisions so far for this packet ) (", self.s,
+                  "collisions so far for this loraNode)")
             yield self.env.timeout(self.k)
             yield self.env.process(self.sendpacket(gateway))
 
@@ -245,12 +265,10 @@ def loranode_arrival_process(env: simpy.Environment, current_lnode: LoraNode):
     global trx_attempts
 
     while True:
-        # yield env.process(current_lnode.sendpacket(l_gw))
-        # yield env.timeout(np.random.random()*0.1)
+
         # L is λ, the arrival rate in Poisson process
 
         IAT = random.expovariate(L)
-        P_q_add = np.random.random()
         # print("IAT:", IAT)
         yield env.timeout(IAT)
         total_packets_created += 1
@@ -260,45 +278,13 @@ def loranode_arrival_process(env: simpy.Environment, current_lnode: LoraNode):
             pkt.arrival_time = env.now
 
             current_lnode.queue.put(pkt)
-            # yield env.process(current_lnode.sendpacket(l_gw, pkt))
             print("( loraNode", current_lnode.id, ") Packet", pkt.id, "arrived at:", pkt.arrival_time)
             print("( loraNode", current_lnode.id, ") Queue length:", current_lnode.queue.qsize())
         else:
             print("( loraNode", current_lnode.id, ") Queue Full! Dropping Packet...")
-        # statistics calculation
-        # G.append(trx_attempts / (env.now / UPLINK_TIME))
-        # G.append(total_packets_created / (env.now / UPLINK_TIME))
-        P_success = total_packets_sent / trx_attempts
-        # S.append(G[-1] * P_success)
-        # S.append(total_packets_sent / (env.now / UPLINK_TIME))
 
-        # if P_q_add <= P_arrival:
-        #     pkt = Packet(total_packets_created)
-        #     pkt.owner = current_lnode.id
-        #     total_packets_created += 1
-        #     pkt.arrival_time = env.now
-        #
-        #     current_lnode.queue.put(pkt)
-        #     # yield env.process(current_lnode.sendpacket(l_gw, pkt))
-        #     print("Packet",pkt.id,"arrived on ( loraNode",current_lnode.id,") at:",pkt.arrival_time)
-        #     # statistics calculation
-        #     G.append(trx_attempts / (env.now / UPLINK_TIME))
-        #     # G.append(total_packets_created / (env.now / UPLINK_TIME))
-        #     P_success = total_packets_sent / total_packets_created
-        #     # S.append(G[-1] * P_success)
-        #     S.append(total_packets_sent / (env.now / UPLINK_TIME))
-        #
-        #     if SLOTTED_ALOHA:
-        #         yield wait_next_timeslot(env)
-        # else:
-        #     Nodes_col_flag[current_lnode.id] = 0
-        #     yield wait_next_timeslot(env)
-        #     if not SLOTTED_ALOHA:
-        #         yield env.timeout(5)
 
-        # if not current_lnode.queue.empty():
-        #     env.process(current_lnode.sendpacket(l_gw))
-        yield env.process(current_lnode.sendpacket(l_gw))
+        env.process(current_lnode.sendpacket(l_gw))
 
 
 def loranode_transmit_process(env: simpy.Environment, current_lnode: LoraNode):
@@ -325,11 +311,8 @@ def setup(env: simpy.Environment):
         # print("\n\n\n------====== Creating a new LoRa Node ======------\n\n\n")
         lnode = LoraNode(env, lora_nodes_created)
         lora_nodes_created += 1
-        # loraNodes.append(lnode)
         env.process(loranode_arrival_process(env, lnode))
-        # yield env.process(lnode.sendpacket(l_gw))
         env.process(loranode_transmit_process(env, lnode))
-
 
 env = simpy.Environment()
 
@@ -344,11 +327,8 @@ print("Packets sent:", total_packets_sent)
 print("Lora nodes:", lora_nodes_created)
 print("λ:", L)
 print("Trx attempts:", trx_attempts)
-print("Sucessful transmission prob.:", P_success)
-# print("Mean G - channel traffic load:", np.mean(G))
-# print("Last G - channel traffic load:", G[-1])
-# print("Mean S(G) - throughput:", np.mean(S))
-# print("MAX S(G) - throughput:", max(S))
+print("Sucessful transmission prob.:", total_packets_sent / trx_attempts)
+
 print("Traffic load (packets created/slot):", total_packets_created / MAX_TOTAL_TIMESLOTS)
 print("Channel load (transmission attempts/slot)", trx_attempts / MAX_TOTAL_TIMESLOTS)
 print("Throughput (packets sent/slot):", total_packets_sent / MAX_TOTAL_TIMESLOTS)
