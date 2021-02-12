@@ -36,6 +36,14 @@ L = 5 / 3000  # Poisson Arrival rate
 # MAX_TOTAL_TIMESLOTS = 14400 * TIMESLOT
 MAX_TOTAL_TIMESLOTS = 14400 * TIMESLOT
 TOTAL_LORA_ENDNODES = 300
+BURSTY_TRAFFIC_NODES = 100
+L_NODE_BURSTY = [0.0 for _ in range(TOTAL_LORA_ENDNODES)]
+
+for _ in range(TOTAL_LORA_ENDNODES - BURSTY_TRAFFIC_NODES):
+    L_NODE_BURSTY[_] = L
+
+for _ in range((TOTAL_LORA_ENDNODES - BURSTY_TRAFFIC_NODES), TOTAL_LORA_ENDNODES):
+    L_NODE_BURSTY[_] = 10 / 3000
 
 Nodes_col_flag = [0 for _ in range(TOTAL_LORA_ENDNODES)]
 GW_col_flag = [0 for _ in range(TOTAL_LORA_ENDNODES)]
@@ -376,3 +384,5 @@ print("Channel load (transmission attempts/slot)", trx_attempts / MAX_TOTAL_TIME
 print("Throughput (packets sent/slot):", total_packets_sent / MAX_TOTAL_TIMESLOTS)
 print("Total delay:", total_delay)
 print("Avg. delay:", total_delay / total_packets_sent)
+
+print("L array:", L_NODE_BURSTY)
