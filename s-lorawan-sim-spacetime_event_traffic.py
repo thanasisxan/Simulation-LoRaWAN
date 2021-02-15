@@ -2,6 +2,9 @@ import simpy
 import numpy as np
 import queue
 import random
+import matplotlib.pyplot as plt
+
+from scipy.spatial import distance
 
 TIMESLOT = 1  # The timeslot duration
 RX1_DELAY = 0.35  # rx1 Delay before waiting for receiving Acknowledgement(downlink)
@@ -15,7 +18,7 @@ SLOTTED_ALOHA = True
 # Only one of the next 4 flags (BEB, ECA, EFB, EBEB, EIED, ASB) should be set to True!
 
 # If all flags are set to False a simple random uniform backoff time is chosen between (0,63)
-BEB = True  # Binary Exponential Backoff strategy
+BEB = False  # Binary Exponential Backoff strategy
 ECA = False  # Enhanced Collision Avoidance strategy
 EFB = False  # Enhanced Fibonacci Backoff strategy
 EBEB = False  # Enhanced Binary Exponential Backoff strategy
@@ -32,18 +35,10 @@ r_d = np.sqrt(2)
 r_1 = 2
 
 Q = 5  # Queue length
-L = 5 / 3000  # Poisson Arrival rate
+L = 4 / 3000  # Poisson Arrival rate for normal (uncoordinated) traffic
 # MAX_TOTAL_TIMESLOTS = 14400 * TIMESLOT
 MAX_TOTAL_TIMESLOTS = 14400 * TIMESLOT
 TOTAL_LORA_ENDNODES = 300
-BURSTY_TRAFFIC_NODES = 100
-L_NODE_BURSTY = [0.0 for _ in range(TOTAL_LORA_ENDNODES)]
-
-for _ in range(TOTAL_LORA_ENDNODES - BURSTY_TRAFFIC_NODES):
-    L_NODE_BURSTY[_] = L
-
-for _ in range((TOTAL_LORA_ENDNODES - BURSTY_TRAFFIC_NODES), TOTAL_LORA_ENDNODES):
-    L_NODE_BURSTY[_] = 10 / 3000
 
 Nodes_col_flag = [0 for _ in range(TOTAL_LORA_ENDNODES)]
 GW_col_flag = [0 for _ in range(TOTAL_LORA_ENDNODES)]
@@ -53,8 +48,11 @@ total_packets_sent = 0
 trx_attempts = 1
 total_delay = 0
 dropped_packets = 0
-
 P_success = 0  # chance of successfully transmitting a packet
+
+xy = []  # End-nodes coordinates
+EVENT_EPICENTER = np.array([-125, 125])
+Up = 0.05  # event propagation speed
 
 
 # np.random.seed(2392)
@@ -69,6 +67,59 @@ def nextFibonacci(n):
 def previousFibonacci(n):
     a = n / ((1 + np.sqrt(5)) / 2.0)
     return round(a)
+
+
+def nodes_spatial_dist():
+    n = 300
+    shape = np.array([480, 480])
+    sensitivity = 0.6  # 0 means no movement, 1 means max distance is init_dist
+
+    # compute grid shape based on number of points
+    width_ratio = shape[1] / shape[0]
+    num_y = np.int32(np.sqrt(n / width_ratio)) + 1
+    num_x = np.int32(n / num_y) + 1
+
+    # create regularly spaced neurons
+    x = np.linspace(0., shape[1] - 1, num_x, dtype=np.float32)
+    y = np.linspace(0., shape[0] - 1, num_y, dtype=np.float32)
+    coords = np.stack(np.meshgrid(x, y), -1).reshape(-1, 2)
+
+    # compute spacing
+    init_dist = np.min((x[1] - x[0], y[1] - y[0]))
+    min_dist = init_dist * (1 - sensitivity)
+
+    assert init_dist >= min_dist
+    # print(min_dist)
+
+    # perturb points
+    max_movement = (init_dist - min_dist) / 2
+    noise = np.random.uniform(
+        low=-max_movement,
+        high=max_movement,
+        size=(len(coords), 2))
+    coords += noise
+    coords = coords - 250
+    return coords[:-6]
+
+
+def d(z):
+    if z == 0:
+        return 1
+    else:
+        return 0
+
+
+d_th = 100
+W = 150
+t_e = 7200
+
+time = []
+pkts_sent = []
+pkts_gen = []
+
+on_fire_ids = []
+on_danger_ids = []
+normal_ids = []
 
 
 class Packet:
@@ -111,7 +162,7 @@ class LoraGateway:
 
 
 class LoraNode:
-    def __init__(self, env: simpy.Environment, id: int):
+    def __init__(self, env: simpy.Environment, id: int, xy: np.ndarray):
         self.env = env
         self.id = id
         self.CW = CW_min
@@ -125,6 +176,18 @@ class LoraNode:
         self.p_c = 0
         self.ebeb_counter = 0
         self.queue = queue.Queue(Q)
+        self.xy = xy
+        self.dist_epicenter = distance.euclidean(self.xy, EVENT_EPICENTER)
+        self.delta_n = None  # spatial correlation factor
+        if self.dist_epicenter < d_th:
+            self.delta_n = 1
+            on_fire_ids.append(self.id)
+        elif d_th <= self.dist_epicenter < (2 * W - d_th):
+            self.delta_n = 1 / 2 * (1 - np.sin((np.pi * (self.dist_epicenter - W)) / (2 * (W - d_th))))
+            on_danger_ids.append(self.id)
+        elif self.dist_epicenter >= 2 * W - d_th:
+            self.delta_n = 0
+            normal_ids.append(self.id)
 
     def sendpacket(self, gateway: LoraGateway):
         global total_packets_sent
@@ -316,11 +379,18 @@ def loranode_arrival_process(env: simpy.Environment, current_lnode: LoraNode):
     while True:
 
         # L is λ, the arrival rate in Poisson process
-
+        print("Current loraNode id:", current_lnode.id, "at (", current_lnode.xy[0], ",", current_lnode.xy[1], ")")
+        print("Distance from event epicenter:", current_lnode.dist_epicenter)
+        print("Delta_n for node ", current_lnode.id, ":", current_lnode.delta_n)
         IAT = random.expovariate(L)
         # print("IAT:", IAT)
         yield env.timeout(IAT)
         total_packets_created += 1
+
+        time.append(env.now)
+        pkts_gen.append(total_packets_created / env.now)
+        pkts_sent.append(total_packets_sent / env.now)
+
         if not current_lnode.queue.full():
             pkt = Packet(total_packets_created)
             pkt.owner = current_lnode.id
@@ -353,11 +423,12 @@ def wait_next_timeslot(env: simpy.Environment):
 
 def setup(env: simpy.Environment):
     global lora_nodes_created
-
+    global xy
+    xy = nodes_spatial_dist()  # get coordinates of endnodes distributed at grid
     yield env.timeout(1)  # start at 1 to eliminate low env.now number bug at statistics calculation
     for i in range(TOTAL_LORA_ENDNODES):
         # print("\n\n\n------====== Creating a new LoRa Node ======------\n\n\n")
-        lnode = LoraNode(env, lora_nodes_created)
+        lnode = LoraNode(env, lora_nodes_created, xy[i])
         lora_nodes_created += 1
         env.process(loranode_arrival_process(env, lnode))
         env.process(loranode_transmit_process(env, lnode))
@@ -370,6 +441,10 @@ l_gw = LoraGateway(env)
 env.process(setup(env))
 
 env.run(until=MAX_TOTAL_TIMESLOTS)
+
+normal_nodes = np.array([xy[i] for i in normal_ids])
+on_danger_nodes = np.array([xy[i] for i in on_danger_ids])
+on_fire_nodes = np.array([xy[i] for i in on_fire_ids])
 
 print("Packets created: ", total_packets_created)
 print("Packets sent:", total_packets_sent)
@@ -385,4 +460,30 @@ print("Throughput (packets sent/slot):", total_packets_sent / MAX_TOTAL_TIMESLOT
 print("Total delay:", total_delay)
 print("Avg. delay:", total_delay / total_packets_sent)
 
-print("L array:", L_NODE_BURSTY)
+fig1, ax1 = plt.subplots()
+plt.plot(time, pkts_gen, linestyle='solid', c='red', label='Generated, v = {}m/s'.format(Up))
+plt.plot(time, pkts_sent, linestyle='dashed', c='red', label='Delivered, v = {}m/s'.format(Up))
+plt.legend(loc='upper right', edgecolor='black', prop={'size': 9}).get_frame().set_alpha(None)
+
+plt.savefig('PDR_time.pdf', bbox_inches='tight', pad_inches=0.05)
+plt.savefig('PDR_time.svg', bbox_inches='tight', pad_inches=0.05)
+
+fig2, ax2 = plt.subplots()
+plt.xticks([-250, -125, 0, 125, 250])
+plt.yticks([-250, -125, 0, 125, 250])
+plt.minorticks_on()
+plt.scatter(normal_nodes[:, 0], normal_nodes[:, 1], s=15, edgecolors='green', facecolors='none', marker='o',
+            label='End-node (normal)')
+plt.scatter(on_danger_nodes[:, 0], on_danger_nodes[:, 1], s=20, edgecolors='orange', facecolors='none', marker='o',
+            label='End-node (danger)')
+plt.scatter(on_fire_nodes[:, 0], on_fire_nodes[:, 1], s=20, edgecolors='red', facecolors='red', marker='o',
+            label='End-node (on fire)')
+plt.scatter(0, 0, s=50, c='black', marker='h', label='Gateway')
+plt.scatter(-125, 125, s=70, facecolors='darkred', edgecolors='black', marker='x', label='Event epicenter')
+plt.legend(loc='upper right', edgecolor='black', prop={'size': 9}).get_frame().set_alpha(None)
+
+ax2.set_xlabel('Location x (m)')
+ax2.set_ylabel('Location y (m)')
+
+plt.savefig('spatialcor_raised_cosine.svg', bbox_inches='tight', pad_inches=0.05)
+plt.savefig('spatialcor_raised_cosine.pdf', bbox_inches='tight', pad_inches=0.05)
