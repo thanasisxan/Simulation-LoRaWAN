@@ -18,7 +18,7 @@ SLOTTED_ALOHA = True
 # Only one of the next 4 flags (BEB, ECA, EFB, EBEB, EIED, ASB) should be set to True!
 
 # If all flags are set to False a simple random uniform backoff time is chosen between (0,63)
-BEB = False  # Binary Exponential Backoff strategy
+BEB = True  # Binary Exponential Backoff strategy
 ECA = False  # Enhanced Collision Avoidance strategy
 EFB = False  # Enhanced Fibonacci Backoff strategy
 EBEB = False  # Enhanced Binary Exponential Backoff strategy
@@ -35,10 +35,13 @@ r_d = np.sqrt(2)
 r_1 = 2
 
 Q = 5  # Queue length
-L = 4 / 3000  # Poisson Arrival rate for normal (uncoordinated) traffic
+Lu = 5 / 3000  # Poisson Arrival rate for normal (uncoordinated) traffic
+# Lc = 600 / 3000  # Poisson Arrival rate for alarm (coordinated) traffic
+Lc = 2100 / 3000  # Poisson Arrival rate for alarm (coordinated) traffic
 # MAX_TOTAL_TIMESLOTS = 14400 * TIMESLOT
-MAX_TOTAL_TIMESLOTS = 14400 * TIMESLOT
-TOTAL_LORA_ENDNODES = 300
+MAX_TOTAL_TIMESLOTS = 28800 * TIMESLOT
+# MAX_TOTAL_TIMESLOTS = 7800 * TIMESLOT
+TOTAL_LORA_ENDNODES = 600
 
 Nodes_col_flag = [0 for _ in range(TOTAL_LORA_ENDNODES)]
 GW_col_flag = [0 for _ in range(TOTAL_LORA_ENDNODES)]
@@ -50,9 +53,21 @@ total_delay = 0
 dropped_packets = 0
 P_success = 0  # chance of successfully transmitting a packet
 
+time = []
+pkts_sent = []
+pkts_gen = []
+
+on_fire_ids = []
+on_danger_ids = []
+normal_ids = []
+
 xy = []  # End-nodes coordinates
+d_th = 100
+W = 150
+t_e = 7200
+# t_e = 14400
 EVENT_EPICENTER = np.array([-125, 125])
-Up = 0.05  # event propagation speed
+Up = 500  # event propagation speed
 
 
 # np.random.seed(2392)
@@ -69,8 +84,7 @@ def previousFibonacci(n):
     return round(a)
 
 
-def nodes_spatial_dist():
-    n = 300
+def nodes_spatial_dist(n):
     shape = np.array([480, 480])
     sensitivity = 0.6  # 0 means no movement, 1 means max distance is init_dist
 
@@ -99,27 +113,14 @@ def nodes_spatial_dist():
         size=(len(coords), 2))
     coords += noise
     coords = coords - 250
-    return coords[:-6]
+    return coords[:-25]
 
 
 def d(z):
-    if z == 0:
+    if 2000 > z >= 0:
         return 1
     else:
         return 0
-
-
-d_th = 100
-W = 150
-t_e = 7200
-
-time = []
-pkts_sent = []
-pkts_gen = []
-
-on_fire_ids = []
-on_danger_ids = []
-normal_ids = []
 
 
 class Packet:
@@ -189,6 +190,12 @@ class LoraNode:
             self.delta_n = 0
             normal_ids.append(self.id)
 
+    def theta_helper(self, t):
+        return d(t - t_e - self.dist_epicenter / Up)
+
+    def theta(self, t):
+        return self.theta_helper(t) * self.delta_n
+
     def sendpacket(self, gateway: LoraGateway):
         global total_packets_sent
         global trx_attempts
@@ -208,7 +215,7 @@ class LoraNode:
             # Get packet for transmission without removing it from the queue
             packet = self.queue.queue[0]
             # packet = self.queue.get()
-
+            global total_packets_sent
             if self.env.now % 1 == 0:
                 if packet.re_trx_count == 0:
                     print("( loraNode", self.id, ") The Packet", packet.id, "from ( loraNode", packet.owner,
@@ -236,7 +243,7 @@ class LoraNode:
             if sum(Nodes_col_flag) < 2 and sum(GW_col_flag) < 2 and packet.gw_sent_ack:
                 # Successful transmission
                 yield self.env.timeout(ACK_TIME)  # time to complete the reception of Acknowledgment(Downlink)
-
+                global total_packets_sent
                 # # Remove the packet from the queue after successful transmission
                 # self.queue.get()
 
@@ -244,6 +251,7 @@ class LoraNode:
                 Nodes_col_flag[self.id] = 0
                 GW_col_flag[self.id] = 0
                 total_packets_sent += 1
+
                 print("( loraNode", self.id, ") Received ACK for Packet", packet.id, "at:", self.env.now)
                 packet.trx_finish_time = self.env.now
                 print("Packet", packet.id, "finish trx time:", packet.trx_finish_time)
@@ -371,6 +379,7 @@ class LoraNode:
 
 def loranode_arrival_process(env: simpy.Environment, current_lnode: LoraNode):
     global total_packets_created
+    global total_packets_sent
     global Nodes_col_flag
     global P_success
     global trx_attempts
@@ -382,14 +391,20 @@ def loranode_arrival_process(env: simpy.Environment, current_lnode: LoraNode):
         print("Current loraNode id:", current_lnode.id, "at (", current_lnode.xy[0], ",", current_lnode.xy[1], ")")
         print("Distance from event epicenter:", current_lnode.dist_epicenter)
         print("Delta_n for node ", current_lnode.id, ":", current_lnode.delta_n)
-        IAT = random.expovariate(L)
-        # print("IAT:", IAT)
-        yield env.timeout(IAT)
-        total_packets_created += 1
+        print("Theta_n for node ", current_lnode.id, "at", env.now, ":", current_lnode.theta(env.now))
 
         time.append(env.now)
         pkts_gen.append(total_packets_created / env.now)
         pkts_sent.append(total_packets_sent / env.now)
+
+        p = random.uniform(0, 1)
+        if p < current_lnode.theta(env.now):
+            IAT = random.expovariate(Lc)
+        else:
+            IAT = random.expovariate(Lu)
+        # print("IAT:", IAT)
+        yield env.timeout(IAT)
+        total_packets_created += 1
 
         if not current_lnode.queue.full():
             pkt = Packet(total_packets_created)
@@ -399,6 +414,7 @@ def loranode_arrival_process(env: simpy.Environment, current_lnode: LoraNode):
             current_lnode.queue.put(pkt)
             print("( loraNode", current_lnode.id, ") Packet", pkt.id, "arrived at:", pkt.arrival_time)
             print("( loraNode", current_lnode.id, ") Queue length:", current_lnode.queue.qsize())
+
         else:
             dropped_packets += 1
             print("( loraNode", current_lnode.id, ") Queue Full! Dropping Packet...")
@@ -424,7 +440,7 @@ def wait_next_timeslot(env: simpy.Environment):
 def setup(env: simpy.Environment):
     global lora_nodes_created
     global xy
-    xy = nodes_spatial_dist()  # get coordinates of endnodes distributed at grid
+    xy = nodes_spatial_dist(TOTAL_LORA_ENDNODES)  # get coordinates of endnodes distributed at grid
     yield env.timeout(1)  # start at 1 to eliminate low env.now number bug at statistics calculation
     for i in range(TOTAL_LORA_ENDNODES):
         # print("\n\n\n------====== Creating a new LoRa Node ======------\n\n\n")
@@ -450,7 +466,7 @@ print("Packets created: ", total_packets_created)
 print("Packets sent:", total_packets_sent)
 # print("Lora nodes:", lora_nodes_created)
 # print("λ:", L)
-print("Packet dorp rate:", dropped_packets / total_packets_created)
+print("Packet drop rate:", dropped_packets / total_packets_created)
 print("Trx attempts:", trx_attempts)
 # print("Sucessful transmission prob.:", total_packets_sent / trx_attempts)
 
@@ -469,6 +485,7 @@ plt.savefig('PDR_time.pdf', bbox_inches='tight', pad_inches=0.05)
 plt.savefig('PDR_time.svg', bbox_inches='tight', pad_inches=0.05)
 
 fig2, ax2 = plt.subplots()
+plt.title('Spatial correlation factor (raised cosine)')
 plt.xticks([-250, -125, 0, 125, 250])
 plt.yticks([-250, -125, 0, 125, 250])
 plt.minorticks_on()
@@ -477,7 +494,7 @@ plt.scatter(normal_nodes[:, 0], normal_nodes[:, 1], s=15, edgecolors='green', fa
 plt.scatter(on_danger_nodes[:, 0], on_danger_nodes[:, 1], s=20, edgecolors='orange', facecolors='none', marker='o',
             label='End-node (danger)')
 plt.scatter(on_fire_nodes[:, 0], on_fire_nodes[:, 1], s=20, edgecolors='red', facecolors='red', marker='o',
-            label='End-node (on fire)')
+            label='End-node (fire)')
 plt.scatter(0, 0, s=50, c='black', marker='h', label='Gateway')
 plt.scatter(-125, 125, s=70, facecolors='darkred', edgecolors='black', marker='x', label='Event epicenter')
 plt.legend(loc='upper right', edgecolor='black', prop={'size': 9}).get_frame().set_alpha(None)
