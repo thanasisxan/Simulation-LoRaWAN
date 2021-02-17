@@ -3,7 +3,6 @@ import numpy as np
 import queue
 import random
 import matplotlib.pyplot as plt
-
 from scipy.spatial import distance
 
 TIMESLOT = 1  # The timeslot duration
@@ -16,7 +15,6 @@ SLOTTED_ALOHA = True
 
 # Backoff strategies
 # Only one of the next 4 flags (BEB, ECA, EFB, EBEB, EIED, ASB) should be set to True!
-
 # If all flags are set to False a simple random uniform backoff time is chosen between (0,63)
 BEB = True  # Binary Exponential Backoff strategy
 ECA = False  # Enhanced Collision Avoidance strategy
@@ -26,18 +24,15 @@ EIED = False  # Exponential Increase Exponential Decrease
 ASB = False  # Adaptively Scaled Backoff strategy
 Fixed_CW = 63
 
-# Universal Backoff parameters
+# All strategies Backoff parameters
 maxR = 6
 maxB = 5
 CW_min = 2
 CW_max = 1023
 r_d = np.sqrt(2)
 r_1 = 2
+Q = 20  # Queue length
 
-Q = 5  # Queue length
-Lu = 5 / 3000  # Poisson Arrival rate for normal (uncoordinated) traffic
-# Lc = 600 / 3000  # Poisson Arrival rate for alarm (coordinated) traffic
-Lc = 2100 / 3000  # Poisson Arrival rate for alarm (coordinated) traffic
 # MAX_TOTAL_TIMESLOTS = 14400 * TIMESLOT
 MAX_TOTAL_TIMESLOTS = 28800 * TIMESLOT
 # MAX_TOTAL_TIMESLOTS = 7800 * TIMESLOT
@@ -45,6 +40,14 @@ TOTAL_LORA_ENDNODES = 600
 
 Nodes_col_flag = [0 for _ in range(TOTAL_LORA_ENDNODES)]
 GW_col_flag = [0 for _ in range(TOTAL_LORA_ENDNODES)]
+time = []
+pkts_sent = []
+pkts_gen = []
+xy = []  # End-nodes coordinates
+on_fire_ids = []
+on_danger_ids = []
+normal_ids = []
+nodes_burst_trx_ids = []
 total_packets_created = 0
 lora_nodes_created = 0
 total_packets_sent = 0
@@ -53,21 +56,15 @@ total_delay = 0
 dropped_packets = 0
 P_success = 0  # chance of successfully transmitting a packet
 
-time = []
-pkts_sent = []
-pkts_gen = []
 
-on_fire_ids = []
-on_danger_ids = []
-normal_ids = []
-
-xy = []  # End-nodes coordinates
-d_th = 100
-W = 150
-t_e = 7200
-# t_e = 14400
-EVENT_EPICENTER = np.array([-125, 125])
-Up = 500  # event propagation speed
+EVENT_EPICENTER = np.array([-200, 200])  # event epicenter
+d_th = 150  # cut-off distance
+W = 180  # width of window
+t_e = 7200  # event start time
+Lu = 3 / 3000  # Poisson Arrival rate for normal (uncoordinated) traffic
+Lc = 3000 / 3000  # Poisson Arrival rate for alarm (coordinated) traffic
+BURST_DURATION = 1000  # Duration of coordinated(bursty) traffic after the event
+Up = 4  # event propagation speed
 
 
 # np.random.seed(2392)
@@ -85,7 +82,7 @@ def previousFibonacci(n):
 
 
 def nodes_spatial_dist(n):
-    shape = np.array([480, 480])
+    shape = np.array([1000, 1000])
     sensitivity = 0.6  # 0 means no movement, 1 means max distance is init_dist
 
     # compute grid shape based on number of points
@@ -112,12 +109,12 @@ def nodes_spatial_dist(n):
         high=max_movement,
         size=(len(coords), 2))
     coords += noise
-    coords = coords - 250
-    return coords[:-25]
+    coords = coords - 500
+    return coords
 
 
 def d(z):
-    if 2000 > z >= 0:
+    if 0 <= z < BURST_DURATION:
         return 1
     else:
         return 0
@@ -400,6 +397,7 @@ def loranode_arrival_process(env: simpy.Environment, current_lnode: LoraNode):
         p = random.uniform(0, 1)
         if p < current_lnode.theta(env.now):
             IAT = random.expovariate(Lc)
+            nodes_burst_trx_ids.append(current_lnode.id)
         else:
             IAT = random.expovariate(Lu)
         # print("IAT:", IAT)
@@ -461,6 +459,10 @@ env.run(until=MAX_TOTAL_TIMESLOTS)
 normal_nodes = np.array([xy[i] for i in normal_ids])
 on_danger_nodes = np.array([xy[i] for i in on_danger_ids])
 on_fire_nodes = np.array([xy[i] for i in on_fire_ids])
+nodes_burst_trx_ids = set(nodes_burst_trx_ids)
+
+trx_nodes_burst = np.array([xy[i] for i in nodes_burst_trx_ids])
+trx_nodes_normal = np.array([xy[i] for i in range(TOTAL_LORA_ENDNODES) if i not in nodes_burst_trx_ids])
 
 print("Packets created: ", total_packets_created)
 print("Packets sent:", total_packets_sent)
@@ -476,27 +478,36 @@ print("Throughput (packets sent/slot):", total_packets_sent / MAX_TOTAL_TIMESLOT
 print("Total delay:", total_delay)
 print("Avg. delay:", total_delay / total_packets_sent)
 
+print(nodes_burst_trx_ids)
+print("Nodes transmitted bursty traffic during the event:", len(nodes_burst_trx_ids))
+
+
 fig1, ax1 = plt.subplots()
 plt.plot(time, pkts_gen, linestyle='solid', c='red', label='Generated, v = {}m/s'.format(Up))
 plt.plot(time, pkts_sent, linestyle='dashed', c='red', label='Delivered, v = {}m/s'.format(Up))
 plt.legend(loc='upper right', edgecolor='black', prop={'size': 9}).get_frame().set_alpha(None)
 
+ax1.set_xlabel('Time (s)')
+ax1.set_ylabel('Number of packets/s')
+
 plt.savefig('PDR_time.pdf', bbox_inches='tight', pad_inches=0.05)
 plt.savefig('PDR_time.svg', bbox_inches='tight', pad_inches=0.05)
 
+
 fig2, ax2 = plt.subplots()
-plt.title('Spatial correlation factor (raised cosine)')
-plt.xticks([-250, -125, 0, 125, 250])
-plt.yticks([-250, -125, 0, 125, 250])
+plt.title('Spatial correlation factor (raised cosine), N={}'.format(TOTAL_LORA_ENDNODES))
+plt.xticks([-500, -250, 0, 250, 500])
+plt.yticks([-500, -250, 0, 250, 500])
 plt.minorticks_on()
 plt.scatter(normal_nodes[:, 0], normal_nodes[:, 1], s=15, edgecolors='green', facecolors='none', marker='o',
             label='End-node (normal)')
 plt.scatter(on_danger_nodes[:, 0], on_danger_nodes[:, 1], s=20, edgecolors='orange', facecolors='none', marker='o',
             label='End-node (danger)')
-plt.scatter(on_fire_nodes[:, 0], on_fire_nodes[:, 1], s=20, edgecolors='red', facecolors='red', marker='o',
+plt.scatter(on_fire_nodes[:, 0], on_fire_nodes[:, 1], s=20, edgecolors='red', facecolors='none', marker='o',
             label='End-node (fire)')
-plt.scatter(0, 0, s=50, c='black', marker='h', label='Gateway')
-plt.scatter(-125, 125, s=70, facecolors='darkred', edgecolors='black', marker='x', label='Event epicenter')
+plt.scatter(0, 0, s=50, c='blue', marker='h', label='Gateway')
+plt.scatter(EVENT_EPICENTER[0], EVENT_EPICENTER[1], s=70, facecolors='darkred', edgecolors='black', marker='x',
+            label='Event epicenter')
 plt.legend(loc='upper right', edgecolor='black', prop={'size': 9}).get_frame().set_alpha(None)
 
 ax2.set_xlabel('Location x (m)')
@@ -504,3 +515,23 @@ ax2.set_ylabel('Location y (m)')
 
 plt.savefig('spatialcor_raised_cosine.svg', bbox_inches='tight', pad_inches=0.05)
 plt.savefig('spatialcor_raised_cosine.pdf', bbox_inches='tight', pad_inches=0.05)
+
+fig3, ax3 = plt.subplots()
+plt.title('End-nodes transmitted burst traffic, N={}'.format(TOTAL_LORA_ENDNODES))
+plt.xticks([-500, -250, 0, 250, 500])
+plt.yticks([-500, -250, 0, 250, 500])
+plt.minorticks_on()
+plt.scatter(trx_nodes_normal[:, 0], trx_nodes_normal[:, 1], s=15, edgecolors='green', facecolors='none', marker='o',
+            label='End-node (normal)')
+plt.scatter(trx_nodes_burst[:, 0], trx_nodes_burst[:, 1], s=20, edgecolors='red', facecolors='red', marker='o',
+            label='End-node (burst)')
+plt.scatter(0, 0, s=50, c='blue', marker='h', label='Gateway')
+plt.scatter(EVENT_EPICENTER[0], EVENT_EPICENTER[1], s=70, facecolors='darkred', edgecolors='black', marker='x',
+            label='Event epicenter')
+plt.legend(loc='upper right', edgecolor='black', prop={'size': 9}).get_frame().set_alpha(None)
+
+ax3.set_xlabel('Location x (m)')
+ax3.set_ylabel('Location y (m)')
+
+plt.savefig('nodes_burst.svg', bbox_inches='tight', pad_inches=0.05)
+plt.savefig('nodes_burst.pdf', bbox_inches='tight', pad_inches=0.05)
