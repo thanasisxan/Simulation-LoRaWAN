@@ -2,13 +2,18 @@ import simpy
 import numpy as np
 import queue
 import random
-import matplotlib.pyplot as plt
 from scipy.spatial import distance
+import matplotlib.pyplot as plt
 
 TIMESLOT = 1  # The timeslot duration
 RX1_DELAY = 0.35  # rx1 Delay before waiting for receiving Acknowledgement(downlink)
 UPLINK_TIME = 0.5  # Time for the payload
 ACK_TIME = 0.15  # ACK packet time of air
+
+# TIMESLOT = 1  # The timeslot duration
+# RX1_DELAY = 0.01  # rx1 Delay before waiting for receiving Acknowledgement(downlink)
+# UPLINK_TIME = 0.5  # Time for the payload
+# ACK_TIME = 0.01  # ACK packet time of air
 
 SLOTTED_ALOHA = True
 # SLOTTED_ALOHA = False
@@ -25,7 +30,7 @@ ASB = False  # Adaptively Scaled Backoff strategy
 Fixed_CW = 63
 
 # All strategies Backoff parameters
-maxR = 6
+maxR = 3
 maxB = 5
 CW_min = 2
 CW_max = 1023
@@ -33,10 +38,10 @@ r_d = np.sqrt(2)
 r_1 = 2
 Q = 20  # Queue length
 
-# MAX_TOTAL_TIMESLOTS = 14400 * TIMESLOT
 MAX_TOTAL_TIMESLOTS = 28800 * TIMESLOT
+# MAX_TOTAL_TIMESLOTS = 28800 * TIMESLOT
 # MAX_TOTAL_TIMESLOTS = 7800 * TIMESLOT
-TOTAL_LORA_ENDNODES = 600
+TOTAL_LORA_ENDNODES = 1000
 
 Nodes_col_flag = [0 for _ in range(TOTAL_LORA_ENDNODES)]
 GW_col_flag = [0 for _ in range(TOTAL_LORA_ENDNODES)]
@@ -55,16 +60,19 @@ trx_attempts = 1
 total_delay = 0
 dropped_packets = 0
 P_success = 0  # chance of successfully transmitting a packet
+SF_list = [7, 8, 9, 10, 11, 12]
+nodes_SFs = [0 for _ in range(TOTAL_LORA_ENDNODES)]
 
-
-EVENT_EPICENTER = np.array([-200, 200])  # event epicenter
-d_th = 150  # cut-off distance
-W = 180  # width of window
-t_e = 7200  # event start time
-Lu = 3 / 3000  # Poisson Arrival rate for normal (uncoordinated) traffic
+DIM = 5000
+EVENT_EPICENTER = np.array([-1000, 1000])  # event epicenter
+d_th = 550  # cut-off distance
+W = 600  # width of window
+# t_e = 14400  # event start time
+t_e = MAX_TOTAL_TIMESLOTS / 3  # event start time
+Lu = 1 / 3000  # Poisson Arrival rate for normal (uncoordinated) traffic
 Lc = 3000 / 3000  # Poisson Arrival rate for alarm (coordinated) traffic
 BURST_DURATION = 1000  # Duration of coordinated(bursty) traffic after the event
-Up = 4  # event propagation speed
+Up = 1000  # event propagation speed
 
 
 # np.random.seed(2392)
@@ -82,7 +90,7 @@ def previousFibonacci(n):
 
 
 def nodes_spatial_dist(n):
-    shape = np.array([1000, 1000])
+    shape = np.array([DIM, DIM])
     sensitivity = 0.6  # 0 means no movement, 1 means max distance is init_dist
 
     # compute grid shape based on number of points
@@ -109,12 +117,13 @@ def nodes_spatial_dist(n):
         high=max_movement,
         size=(len(coords), 2))
     coords += noise
-    coords = coords - 500
+    coords = coords - DIM / 2
     return coords
 
 
 def d(z):
     if 0 <= z < BURST_DURATION:
+        # if 0 <= z:
         return 1
     else:
         return 0
@@ -145,12 +154,15 @@ class LoraGateway:
         GW_col_flag[from_node.id] = 1
         # print(Nodes_col_flag[from_node.id])
         yield self.env.timeout(RX1_DELAY)
+        #   Only one node is transmitting to the gateway
         if sum(Nodes_col_flag) < 2 and sum(GW_col_flag) < 2:
             print("( loraGateway ) Sent ACK for Packet", packet.id, "from ( loraNode", packet.owner,
                   ") at:", self.env.now)
             GW_col_flag[from_node.id] = 0
             Nodes_col_flag[from_node.id] = 0
             packet.gw_sent_ack = True
+        elif sum(Nodes_col_flag) == 2 or sum(GW_col_flag) == 2:
+            print(0)
         else:
             print("Collision (gw)")
             Nodes_col_flag[from_node.id] = 1
@@ -174,6 +186,10 @@ class LoraNode:
         self.p_c = 0
         self.ebeb_counter = 0
         self.queue = queue.Queue(Q)
+
+        self.SF = random.choice(SF_list)
+
+        # spatial corr
         self.xy = xy
         self.dist_epicenter = distance.euclidean(self.xy, EVENT_EPICENTER)
         self.delta_n = None  # spatial correlation factor
@@ -248,6 +264,10 @@ class LoraNode:
                 Nodes_col_flag[self.id] = 0
                 GW_col_flag[self.id] = 0
                 total_packets_sent += 1
+
+                time.append(env.now)
+                pkts_gen.append(total_packets_created / env.now)
+                pkts_sent.append(total_packets_sent / env.now)
 
                 print("( loraNode", self.id, ") Received ACK for Packet", packet.id, "at:", self.env.now)
                 packet.trx_finish_time = self.env.now
@@ -382,7 +402,8 @@ def loranode_arrival_process(env: simpy.Environment, current_lnode: LoraNode):
     global trx_attempts
     global dropped_packets
 
-    while True:
+    # while True:
+    for _ in range(TOTAL_LORA_ENDNODES * MAX_TOTAL_TIMESLOTS * 1000):
 
         # L is λ, the arrival rate in Poisson process
         print("Current loraNode id:", current_lnode.id, "at (", current_lnode.xy[0], ",", current_lnode.xy[1], ")")
@@ -390,9 +411,9 @@ def loranode_arrival_process(env: simpy.Environment, current_lnode: LoraNode):
         print("Delta_n for node ", current_lnode.id, ":", current_lnode.delta_n)
         print("Theta_n for node ", current_lnode.id, "at", env.now, ":", current_lnode.theta(env.now))
 
-        time.append(env.now)
-        pkts_gen.append(total_packets_created / env.now)
-        pkts_sent.append(total_packets_sent / env.now)
+        # time.append(env.now)
+        # pkts_gen.append(total_packets_created/TOTAL_LORA_ENDNODES)
+        # pkts_sent.append(total_packets_sent/TOTAL_LORA_ENDNODES)
 
         p = random.uniform(0, 1)
         if p < current_lnode.theta(env.now):
@@ -444,6 +465,9 @@ def setup(env: simpy.Environment):
         # print("\n\n\n------====== Creating a new LoRa Node ======------\n\n\n")
         lnode = LoraNode(env, lora_nodes_created, xy[i])
         lora_nodes_created += 1
+
+        # get the node sf and add it to array for flexibility
+        nodes_SFs[lnode.id] = lnode.SF
         env.process(loranode_arrival_process(env, lnode))
         env.process(loranode_transmit_process(env, lnode))
 
@@ -464,6 +488,20 @@ nodes_burst_trx_ids = set(nodes_burst_trx_ids)
 trx_nodes_burst = np.array([xy[i] for i in nodes_burst_trx_ids])
 trx_nodes_normal = np.array([xy[i] for i in range(TOTAL_LORA_ENDNODES) if i not in nodes_burst_trx_ids])
 
+SF7_nodes_ids = [i for i, x in enumerate(nodes_SFs) if x == 7]
+SF8_nodes_ids = [i for i, x in enumerate(nodes_SFs) if x == 8]
+SF9_nodes_ids = [i for i, x in enumerate(nodes_SFs) if x == 9]
+SF10_nodes_ids = [i for i, x in enumerate(nodes_SFs) if x == 10]
+SF11_nodes_ids = [i for i, x in enumerate(nodes_SFs) if x == 11]
+SF12_nodes_ids = [i for i, x in enumerate(nodes_SFs) if x == 12]
+
+SF7_nodes = np.array([xy[i] for i in SF7_nodes_ids])
+SF8_nodes = np.array([xy[i] for i in SF8_nodes_ids])
+SF9_nodes = np.array([xy[i] for i in SF9_nodes_ids])
+SF10_nodes = np.array([xy[i] for i in SF10_nodes_ids])
+SF11_nodes = np.array([xy[i] for i in SF11_nodes_ids])
+SF12_nodes = np.array([xy[i] for i in SF12_nodes_ids])
+
 print("Packets created: ", total_packets_created)
 print("Packets sent:", total_packets_sent)
 # print("Lora nodes:", lora_nodes_created)
@@ -481,7 +519,7 @@ print("Avg. delay:", total_delay / total_packets_sent)
 print(nodes_burst_trx_ids)
 print("Nodes transmitted bursty traffic during the event:", len(nodes_burst_trx_ids))
 
-
+# PPS - TIME PLOTS
 fig1, ax1 = plt.subplots()
 plt.plot(time, pkts_gen, linestyle='solid', c='red', label='Generated, v = {}m/s'.format(Up))
 plt.plot(time, pkts_sent, linestyle='dashed', c='red', label='Delivered, v = {}m/s'.format(Up))
@@ -490,14 +528,14 @@ plt.legend(loc='upper right', edgecolor='black', prop={'size': 9}).get_frame().s
 ax1.set_xlabel('Time (s)')
 ax1.set_ylabel('Number of packets/s')
 
-plt.savefig('PDR_time.pdf', bbox_inches='tight', pad_inches=0.05)
-plt.savefig('PDR_time.svg', bbox_inches='tight', pad_inches=0.05)
+plt.savefig('pps_time_v={}ms.pdf'.format(Up), bbox_inches='tight', pad_inches=0.05)
+plt.savefig('pps_time_v={}ms.svg'.format(Up), bbox_inches='tight', pad_inches=0.05)
 
-
+# SPATIAL CORRELATION PLOTS
 fig2, ax2 = plt.subplots()
 plt.title('Spatial correlation factor (raised cosine), N={}'.format(TOTAL_LORA_ENDNODES))
-plt.xticks([-500, -250, 0, 250, 500])
-plt.yticks([-500, -250, 0, 250, 500])
+# plt.xticks([-500, -250, 0, 250, 500])
+# plt.yticks([-500, -250, 0, 250, 500])
 plt.minorticks_on()
 plt.scatter(normal_nodes[:, 0], normal_nodes[:, 1], s=15, edgecolors='green', facecolors='none', marker='o',
             label='End-node (normal)')
@@ -505,33 +543,58 @@ plt.scatter(on_danger_nodes[:, 0], on_danger_nodes[:, 1], s=20, edgecolors='oran
             label='End-node (danger)')
 plt.scatter(on_fire_nodes[:, 0], on_fire_nodes[:, 1], s=20, edgecolors='red', facecolors='none', marker='o',
             label='End-node (fire)')
-plt.scatter(0, 0, s=50, c='blue', marker='h', label='Gateway')
-plt.scatter(EVENT_EPICENTER[0], EVENT_EPICENTER[1], s=70, facecolors='darkred', edgecolors='black', marker='x',
+plt.scatter(0, 0, s=50, facecolors='blue', edgecolors='black', marker='h', label='Gateway')
+plt.scatter(EVENT_EPICENTER[0], EVENT_EPICENTER[1], s=70, facecolors='darkred', edgecolors='black', marker='X',
             label='Event epicenter')
 plt.legend(loc='upper right', edgecolor='black', prop={'size': 9}).get_frame().set_alpha(None)
 
 ax2.set_xlabel('Location x (m)')
 ax2.set_ylabel('Location y (m)')
 
-plt.savefig('spatialcor_raised_cosine.svg', bbox_inches='tight', pad_inches=0.05)
-plt.savefig('spatialcor_raised_cosine.pdf', bbox_inches='tight', pad_inches=0.05)
+plt.savefig('spatialcor_raised_cosine_v={}ms.svg'.format(Up), bbox_inches='tight', pad_inches=0.05)
+plt.savefig('spatialcor_raised_cosine_v={}ms.pdf'.format(Up), bbox_inches='tight', pad_inches=0.05)
 
+# NODES TRANSMITTED BURST TRAFFIC PLOT
 fig3, ax3 = plt.subplots()
 plt.title('End-nodes transmitted burst traffic, N={}'.format(TOTAL_LORA_ENDNODES))
-plt.xticks([-500, -250, 0, 250, 500])
-plt.yticks([-500, -250, 0, 250, 500])
+# plt.xticks([-500, -250, 0, 250, 500])
+# plt.yticks([-500, -250, 0, 250, 500])
 plt.minorticks_on()
 plt.scatter(trx_nodes_normal[:, 0], trx_nodes_normal[:, 1], s=15, edgecolors='green', facecolors='none', marker='o',
             label='End-node (normal)')
 plt.scatter(trx_nodes_burst[:, 0], trx_nodes_burst[:, 1], s=20, edgecolors='red', facecolors='red', marker='o',
             label='End-node (burst)')
-plt.scatter(0, 0, s=50, c='blue', marker='h', label='Gateway')
-plt.scatter(EVENT_EPICENTER[0], EVENT_EPICENTER[1], s=70, facecolors='darkred', edgecolors='black', marker='x',
+plt.scatter(0, 0, s=50, facecolors='blue', edgecolors='black', marker='h', label='Gateway')
+plt.scatter(EVENT_EPICENTER[0], EVENT_EPICENTER[1], s=70, facecolors='darkred', edgecolors='black', marker='X',
             label='Event epicenter')
 plt.legend(loc='upper right', edgecolor='black', prop={'size': 9}).get_frame().set_alpha(None)
 
 ax3.set_xlabel('Location x (m)')
 ax3.set_ylabel('Location y (m)')
 
-plt.savefig('nodes_burst.svg', bbox_inches='tight', pad_inches=0.05)
-plt.savefig('nodes_burst.pdf', bbox_inches='tight', pad_inches=0.05)
+plt.savefig('nodes_burst_v={}ms.svg'.format(Up), bbox_inches='tight', pad_inches=0.05)
+plt.savefig('nodes_burst_v={}ms.pdf'.format(Up), bbox_inches='tight', pad_inches=0.05)
+
+# NODES SF DISTRIBUTION PLOT
+fig4, ax4 = plt.subplots()
+plt.title('SF distribution, N={}'.format(TOTAL_LORA_ENDNODES))
+# plt.xticks([-500, -250, 0, 250, 500])
+# plt.yticks([-500, -250, 0, 250, 500])
+plt.minorticks_on()
+plt.scatter(SF7_nodes[:, 0], SF7_nodes[:, 1], s=10, marker='o', label='SF=7')
+plt.scatter(SF8_nodes[:, 0], SF8_nodes[:, 1], s=10, marker='o', label='SF=8')
+plt.scatter(SF9_nodes[:, 0], SF9_nodes[:, 1], s=10, marker='o', label='SF=9')
+plt.scatter(SF10_nodes[:, 0], SF10_nodes[:, 1], s=10, marker='o', label='SF=10')
+plt.scatter(SF11_nodes[:, 0], SF11_nodes[:, 1], s=10, marker='o', label='SF=11')
+plt.scatter(SF12_nodes[:, 0], SF12_nodes[:, 1], s=10, marker='o', label='SF=12')
+
+plt.scatter(0, 0, s=50, facecolors='blue', edgecolors='black', marker='h', label='Gateway')
+plt.scatter(EVENT_EPICENTER[0], EVENT_EPICENTER[1], s=100, facecolors='darkred', edgecolors='black', marker='X',
+            label='Event epicenter')
+plt.legend(loc='upper right', edgecolor='black', prop={'size': 9}).get_frame().set_alpha(None)
+
+ax4.set_xlabel('Location x (m)')
+ax4.set_ylabel('Location y (m)')
+
+plt.savefig('sf_dist_v={}ms.svg'.format(Up), bbox_inches='tight', pad_inches=0.05)
+plt.savefig('sf_dist_v={}ms.pdf'.format(Up), bbox_inches='tight', pad_inches=0.05)
