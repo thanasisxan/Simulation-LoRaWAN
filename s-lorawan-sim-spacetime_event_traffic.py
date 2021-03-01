@@ -446,6 +446,10 @@ def loranode_transmit_process(env: simpy.Environment, current_lnode: LoraNode):
         yield current_lnode.sendpacket(l_gw)
         # print("\n\n=================", current_lnode.id,"\n\n")
 
+    # while True:
+    #     yield env.timeout(0.6)
+    #     yield current_lnode.sendpacket(l_gw)
+
 
 def wait_next_timeslot(env: simpy.Environment):
     if SLOTTED_ALOHA:
