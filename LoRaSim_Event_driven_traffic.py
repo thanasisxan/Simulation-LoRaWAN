@@ -59,7 +59,7 @@ import os
 graphics = 0
 
 # do the full collision check
-full_collision = True
+full_collision = False
 
 # experiments:
 # 0: packet with longest airtime, aloha-style experiment
@@ -499,13 +499,14 @@ def transmit(env, node):
         node.packet.lost = False
 
         global prev_time, pkts_sent, pkts_gen, pkts_sent_prev, pkts_gen_prev
-
-        if env.now - prev_time >= 30000:
-            pkts_gen.append(nrProcessed - pkts_gen_prev)
+        sumsent = sum(s.sent for s in nodes)
+        # if env.now - prev_time >= 5000:
+        if env.now - prev_time >= 1000:
+            pkts_gen.append(sumsent - pkts_gen_prev)
             pkts_sent.append(nrReceived - pkts_sent_prev)
             time.append(env.now / 1000)
             prev_time = env.now
-            pkts_gen_prev = nrProcessed
+            pkts_gen_prev = sumsent
             pkts_sent_prev = nrReceived
 
 
@@ -558,7 +559,7 @@ evep_y = 100
 d_th = 100  # cut-off distance
 W = 120  # width of window
 
-Up = 500  # event propagation speed
+Up = 4000  # event propagation speed
 BURST_DURATION = 1500000
 
 if __name__ == "__main__":
@@ -654,6 +655,8 @@ if __name__ == "__main__":
 
     # start simulation
     env.run(until=simtime)
+
+    nodes_burst_trx_ids = set(nodes_burst_trx_ids)
 
     # print(stats and save into file
     print("nrCollisions ", nrCollisions)
