@@ -12,7 +12,6 @@
  $Date: 2016-10-17 13:23:52 +0100 (Mon, 17 Oct 2016) $
  $Revision: 218 $
 """
-from scipy.spatial import distance
 
 """
  SYNOPSIS:
@@ -54,6 +53,10 @@ import sys
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import csv
+from progressbarsimple import ProgressBar
+from progress.bar import Bar
+
 
 # turn on/off graphics
 graphics = 0
@@ -70,12 +73,15 @@ full_collision = False
 
 # this is an array with measured values for sensitivity
 # see paper, Table 3
+
 sf7 = np.array([7, -126.5, -124.25, -120.75])
 sf8 = np.array([8, -127.25, -126.75, -124.0])
 sf9 = np.array([9, -131.25, -128.25, -127.5])
 sf10 = np.array([10, -132.75, -130.25, -128.75])
 sf11 = np.array([11, -134.5, -132.75, -128.75])
 sf12 = np.array([12, -133.25, -132.25, -132.25])
+
+
 
 
 #
@@ -135,14 +141,14 @@ def checkcollision(packet):
 #        |f1-f2| <= 60 kHz if f1 or f2 has bw 250
 #        |f1-f2| <= 30 kHz if f1 or f2 has bw 125
 def frequencyCollision(p1, p2):
-    if (abs(p1.freq - p2.freq) <= 120 and (p1.bw == 500 or p2.bw == 500)):
+    if abs(p1.freq - p2.freq) <= 120 and (p1.bw == 500 or p2.bw == 500):
         print("frequency coll 500")
         return True
-    elif (abs(p1.freq - p2.freq) <= 60 and (p1.bw == 250 or p2.bw == 250)):
+    elif abs(p1.freq - p2.freq) <= 60 and (p1.bw == 250 or p2.bw == 250):
         print("frequency coll 250")
         return True
     else:
-        if (abs(p1.freq - p2.freq) <= 30):
+        if abs(p1.freq - p2.freq) <= 30:
             print("frequency coll 125")
             return True
         # else:
@@ -307,7 +313,7 @@ class myNode():
             ax.add_artist(plt.Circle((self.x, self.y), 2, fill=False, color='green', label='node'))
 
     def theta_helper(self, t):
-        return d(t - t_e - self.dist_epicenter / Up)
+        return d(t - t_e - (self.dist_epicenter / Up) * 1000)
 
     def theta(self, t):
         return self.theta_helper(t) * self.delta_n
@@ -434,11 +440,13 @@ class myPacket():
 #
 def transmit(env, node):
     while True:
-
-        p = random.uniform(0, 1)
-        if p < node.theta(env.now):
-            yield env.timeout(random.expovariate(1))
-            nodes_burst_trx_ids.append(node.nodeid)
+        if EVENT_TRAFFIC:
+            p = random.uniform(0, 1)
+            if p < node.theta(env.now):
+                yield env.timeout(random.expovariate(1))
+                nodes_burst_trx_ids.append(node.nodeid)
+            else:
+                yield env.timeout(random.expovariate(1.0 / float(node.period)))
         else:
             yield env.timeout(random.expovariate(1.0 / float(node.period)))
 
@@ -501,13 +509,14 @@ def transmit(env, node):
         global prev_time, pkts_sent, pkts_gen, pkts_sent_prev, pkts_gen_prev
         sumsent = sum(s.sent for s in nodes)
         # if env.now - prev_time >= 5000:
-        if env.now - prev_time >= 1000:
+        if env.now - prev_time >= 100:
             pkts_gen.append(sumsent - pkts_gen_prev)
             pkts_sent.append(nrReceived - pkts_sent_prev)
             time.append(env.now / 1000)
             prev_time = env.now
             pkts_gen_prev = sumsent
             pkts_sent_prev = nrReceived
+            myProgressBar.progress(int(env.now))
 
 
 # global stuff
@@ -531,7 +540,7 @@ nrLost = 0
 Ptx = 14
 gamma = 2.08
 # d0 = 40.0
-d0 = 80.0
+d0 = 40.0
 var = 0  # variance ignored for now
 Lpld0 = 127.41
 GL = 0
@@ -544,6 +553,8 @@ on_danger_ids = []
 normal_ids = []
 nodes_burst_trx_ids = []
 global t_e  # event start time
+global myProgressBar
+
 
 global pkts_sent, pkts_gen, time, prev_time, pkts_gen_prev, pkts_sent_prev
 pkts_sent = []
@@ -556,11 +567,20 @@ pkts_sent_prev = 0
 # event epicenter
 evep_x = 100
 evep_y = 100
-d_th = 100  # cut-off distance
-W = 120  # width of window
+d_th = 50  # cut-off distance
+W = 60  # width of window
 
-Up = 4000  # event propagation speed
-BURST_DURATION = 1500000
+Up = 500  # event propagation speed
+BURST_DURATION = 1000000
+
+# event driven traffic
+EVENT_TRAFFIC = True
+
+if not EVENT_TRAFFIC:
+    Up = '-'
+
+
+# random.seed(430)
 
 if __name__ == "__main__":
 
@@ -579,6 +599,10 @@ if __name__ == "__main__":
         print("Simtime: ", simtime)
         print("payload size: ", payloadlen)
         print("Full Collision: ", full_collision)
+
+        myProgressBar = ProgressBar(nElements=100, nIterations=simtime)
+
+
     else:
         print("usage: ./loraDir nrNodes avgSendTime experimentNr simtime payloadsize [full_collision]")
         print("experiment 0 and 1 use 1 frequency only")
@@ -608,14 +632,14 @@ if __name__ == "__main__":
     # global graphics
     t_e = simtime / 2
     sensi = np.array([sf7, sf8, sf9, sf10, sf11, sf12])
-    if experiment in [0, 1, 4]:
+    if experiment in [0, 1, 4, 5]:
         minsensi = sensi[5, 2]  # 5th row is SF12, 2nd column is BW125
     elif experiment == 2:
         minsensi = -112.0  # no experiments, so value from datasheet
     elif experiment == 3:
         minsensi = np.amin(sensi)  # Experiment 3 can use any setting, so take minimum
-    else:
-        minsensi = np.amin(sensi)  # Experiment 3 can use any setting, so take minimum
+    # else:
+    #     minsensi = np.amin(sensi)  # Experiment 5 can use any setting, so take minimum
     Lpl = Ptx - minsensi
     print("amin", minsensi, "Lpl", Lpl)
     maxDist = d0 * (math.e ** ((Lpl - Lpld0) / (10.0 * gamma)))
@@ -670,8 +694,9 @@ if __name__ == "__main__":
     # mA = 90    # current draw for TX = 17 dBm
     V = 3.0  # voltage XXX
     sent = sum(n.sent for n in nodes)
-    energy = sum(node.packet.rectime * TX[int(node.packet.txpow) + 2] * V * node.sent for node in nodes) / 1e6
+    # energy = sum(node.packet.rectime * TX[int(node.packet.txpow) + 2] * V * node.sent for node in nodes) / 1e6
 
+    energy = 0
     print("energy (in J): ", energy)
     print("sent packets: ", sent)
     print("collisions: ", nrCollisions)
@@ -685,6 +710,8 @@ if __name__ == "__main__":
     der = nrReceived / float(sent)
     print("DER method 2:", der)
 
+    pdr = nrReceived / float(sent)
+    print("Packet Delivery Rate (PDR):", pdr)
     # this can be done to keep graphics visible
     if graphics == 1:
         sys.stdin.read()
@@ -695,15 +722,49 @@ if __name__ == "__main__":
     fname = "exp" + str(experiment) + ".dat"
     print(fname)
     if os.path.isfile(fname):
-        res = "\n" + str(nrNodes) + " " + str(nrCollisions) + " " + str(sent) + " " + str(energy)
+        res = "\n" + str(nrNodes) + " " + str(nrCollisions) + " " + str(sent) + " " + str(energy) + " " + str(
+            Up) + " " + str(pdr)
     else:
-        res = "#nrNodes nrCollisions nrTransmissions OverallEnergy\n" + str(nrNodes) + " " + str(
-            nrCollisions) + " " + str(sent) + " " + str(energy)
+        res = "#nrNodes nrCollisions nrTransmissions OverallEnergy Up PDR\n" + str(nrNodes) + " " + str(
+            nrCollisions) + " " + str(sent) + " " + str(energy) + " " + str(Up) + " " + str(pdr)
     with open(fname, "a") as myfile:
         myfile.write(res)
     myfile.close()
 
-    # with open('nodes.txt','w') as nfile:
+    fname_csv = "exp" + str(experiment) + ".csv"
+    print(fname_csv)
+    create_csv = True
+    if os.path.isfile(fname_csv):
+        create_csv = False
+    else:
+        create_csv = True
+    with open(fname_csv, mode='a+', newline='') as csv_file:
+        fieldnames = ['#nrNodes', 'nrCollisions', 'nrTransmissions', 'OverallEnergy', 'Up', 'PDR']
+        if create_csv:
+            writer = csv.writer(csv_file, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+            writer.writerow(fieldnames)
+        else:
+            writer = csv.writer(csv_file, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        writer.writerow([str(nrNodes), str(nrCollisions), str(sent), str(energy), str(Up), str(pdr)])
+    csv_file.close()
+
+    fname_csv_gen_sen = "genearated_delivered_v=" + str(Up) + "ms" + ".csv"
+    print(fname_csv_gen_sen)
+    create_csv_gen_sen = True
+    if os.path.isfile(fname_csv_gen_sen):
+        create_csv_gen_sen = False
+    else:
+        create_csv_gen_sen = True
+    with open(fname_csv_gen_sen, mode='a+', newline='') as csv_file:
+        fieldnames = ['time' + str(Up), '#pkts_gen' + str(Up), '#pkts_sent' + str(Up)]
+        if create_csv_gen_sen:
+            writer = csv.writer(csv_file, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+            writer.writerow(fieldnames)
+        else:
+            writer = csv.writer(csv_file, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        for i in range(len(time)):
+            writer.writerow([time[i], pkts_gen[i], pkts_sent[i]])
+    csv_file.close()# with open('nodes.txt','w') as nfile:
     #     for n in nodes:
     #         nfile.write("{} {} {}\n".format(n.x, n.y, n.nodeid))
     # with open('basestation.txt', 'w') as bfile:
