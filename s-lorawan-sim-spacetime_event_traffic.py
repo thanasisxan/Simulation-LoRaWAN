@@ -30,7 +30,7 @@ ASB = False  # Adaptively Scaled Backoff strategy
 Fixed_CW = 63
 
 # All strategies Backoff parameters
-maxR = 3
+maxR = 8
 maxB = 5
 CW_min = 2
 CW_max = 1023
@@ -38,16 +38,16 @@ r_d = np.sqrt(2)
 r_1 = 2
 Q = 20  # Queue length
 
-MAX_TOTAL_TIMESLOTS = 28800 * TIMESLOT
+# MAX_TOTAL_TIMESLOTS = 288000 * TIMESLOT
 # MAX_TOTAL_TIMESLOTS = 28800 * TIMESLOT
-# MAX_TOTAL_TIMESLOTS = 7800 * TIMESLOT
+MAX_TOTAL_TIMESLOTS = 3000000 * TIMESLOT
 TOTAL_LORA_ENDNODES = 1000
 
 Nodes_col_flag = [0 for _ in range(TOTAL_LORA_ENDNODES)]
 GW_col_flag = [0 for _ in range(TOTAL_LORA_ENDNODES)]
-time = []
-pkts_sent = []
-pkts_gen = []
+time = [0]
+pkts_sent = [0]
+pkts_gen = [0]
 xy = []  # End-nodes coordinates
 on_fire_ids = []
 on_danger_ids = []
@@ -62,17 +62,19 @@ dropped_packets = 0
 P_success = 0  # chance of successfully transmitting a packet
 SF_list = [7, 8, 9, 10, 11, 12]
 nodes_SFs = [0 for _ in range(TOTAL_LORA_ENDNODES)]
+packetsAtGW = []
+prev_time = 0
 
 DIM = 5000
 EVENT_EPICENTER = np.array([-1000, 1000])  # event epicenter
-d_th = 550  # cut-off distance
-W = 600  # width of window
+d_th = 850  # cut-off distance
+W = 900  # width of window
 # t_e = 14400  # event start time
 t_e = MAX_TOTAL_TIMESLOTS / 3  # event start time
-Lu = 1 / 3000  # Poisson Arrival rate for normal (uncoordinated) traffic
-Lc = 3000 / 3000  # Poisson Arrival rate for alarm (coordinated) traffic
-BURST_DURATION = 1000  # Duration of coordinated(bursty) traffic after the event
-Up = 1000  # event propagation speed
+Lu = 1 / 100000  # Poisson Arrival rate for normal (uncoordinated) traffic
+Lc = 3600 / 3000  # Poisson Arrival rate for alarm (coordinated) traffic
+BURST_DURATION = 5000  # Duration of coordinated(bursty) traffic after the event
+Up = 2000  # event propagation speed
 
 
 # np.random.seed(2392)
@@ -89,6 +91,7 @@ def previousFibonacci(n):
     return round(a)
 
 
+# give uniformly random coordinates to nodes
 def nodes_spatial_dist(n):
     shape = np.array([DIM, DIM])
     sensitivity = 0.6  # 0 means no movement, 1 means max distance is init_dist
@@ -121,6 +124,8 @@ def nodes_spatial_dist(n):
     return coords
 
 
+# pulse function δ that defines the event (burst traffic) duration
+# return 1 if the event is happening and 0 if not
 def d(z):
     if 0 <= z < BURST_DURATION:
         # if 0 <= z:
@@ -137,6 +142,7 @@ class Packet:
         self.arrival_time = 0
         self.trx_finish_time = 0
         self.gw_sent_ack = False
+        self.SF = 0
 
 
 class LoraGateway:
@@ -146,29 +152,63 @@ class LoraGateway:
     def receivepacket(self, packet: Packet, from_node):
         global Nodes_col_flag
         global GW_col_flag
+        global packetsAtGW
 
         print("( loraGateway ) Received Packet", packet.id, "from ( loraNode", packet.owner,
               ") at", self.env.now)
 
+        packetsAtGW.append(packet)
         Nodes_col_flag[from_node.id] = 1
         GW_col_flag[from_node.id] = 1
+        print("Pakets currently at gw:", len(packetsAtGW))
         # print(Nodes_col_flag[from_node.id])
         yield self.env.timeout(RX1_DELAY)
         #   Only one node is transmitting to the gateway
-        if sum(Nodes_col_flag) < 2 and sum(GW_col_flag) < 2:
+        # if sum(Nodes_col_flag) < 2 and sum(GW_col_flag) < 2:
+        if sum(GW_col_flag) < 2:
             print("( loraGateway ) Sent ACK for Packet", packet.id, "from ( loraNode", packet.owner,
                   ") at:", self.env.now)
             GW_col_flag[from_node.id] = 0
             Nodes_col_flag[from_node.id] = 0
+            packetsAtGW.remove(packet)
             packet.gw_sent_ack = True
-        elif sum(Nodes_col_flag) == 2 or sum(GW_col_flag) == 2:
-            print(0)
+        elif 6 >= sum(GW_col_flag) >= 2:
+            # print(0)
+            # print("yo", Nodes_col_flag)
+            # print("yo", GW_col_flag)
+            tmpSFs = []
+            for p in packetsAtGW:
+                tmpSFs.append(p.SF)
+                print("Packet at GW with SF=" + str(p.SF))
+            print("SFs at GW:", tmpSFs, "total:", len(tmpSFs), "unique:", len(set(tmpSFs)))
+
+            if len(tmpSFs) > len(set(tmpSFs)):
+                print("Collision (gw)")
+                Nodes_col_flag[from_node.id] = 1
+                GW_col_flag[from_node.id] = 1
+                packet.gw_sent_ack = False
+                packetsAtGW.remove(packet)
+            else:
+                print("( loraGateway ) Sent ACK for Packet", packet.id, "from ( loraNode", packet.owner,
+                      ") at:", self.env.now)
+                GW_col_flag[from_node.id] = 0
+                Nodes_col_flag[from_node.id] = 0
+                packetsAtGW.remove(packet)
+                packet.gw_sent_ack = True
         else:
             print("Collision (gw)")
             Nodes_col_flag[from_node.id] = 1
             GW_col_flag[from_node.id] = 1
             packet.gw_sent_ack = False
+            packetsAtGW.remove(packet)
             # collision flag
+
+        global prev_time
+        if env.now - prev_time >= 250:
+            time.append(env.now / 1000)
+            pkts_gen.append(total_packets_created / (env.now / 1000))
+            pkts_sent.append(total_packets_sent / (env.now / 1000))
+            prev = env.now
 
 
 class LoraNode:
@@ -253,7 +293,8 @@ class LoraNode:
             GW_col_flag[self.id] = 1
             yield self.env.process(gateway.receivepacket(packet, self))  # timeout(RX1_DELAY) at receivepacket (GW)
 
-            if sum(Nodes_col_flag) < 2 and sum(GW_col_flag) < 2 and packet.gw_sent_ack:
+            # if sum(Nodes_col_flag) < 2 and sum(GW_col_flag) < 2 and packet.gw_sent_ack:
+            if packet.gw_sent_ack:
                 # Successful transmission
                 yield self.env.timeout(ACK_TIME)  # time to complete the reception of Acknowledgment(Downlink)
                 global total_packets_sent
@@ -265,9 +306,9 @@ class LoraNode:
                 GW_col_flag[self.id] = 0
                 total_packets_sent += 1
 
-                time.append(env.now)
-                pkts_gen.append(total_packets_created / env.now)
-                pkts_sent.append(total_packets_sent / env.now)
+                # time.append(env.now)
+                # pkts_gen.append((total_packets_created - (pkts_gen[-1] * time[-1])) / (env.now-time[-1]))
+                # pkts_sent.append(total_packets_sent / env.now)
 
                 print("( loraNode", self.id, ") Received ACK for Packet", packet.id, "at:", self.env.now)
                 packet.trx_finish_time = self.env.now
@@ -429,6 +470,7 @@ def loranode_arrival_process(env: simpy.Environment, current_lnode: LoraNode):
             pkt = Packet(total_packets_created)
             pkt.owner = current_lnode.id
             pkt.arrival_time = env.now
+            pkt.SF = current_lnode.SF
 
             current_lnode.queue.put(pkt)
             print("( loraNode", current_lnode.id, ") Packet", pkt.id, "arrived at:", pkt.arrival_time)
