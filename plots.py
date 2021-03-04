@@ -39,14 +39,14 @@ v1000 = [0.36581212188576784, 0.14296949655691032, 0.06746098682920824]
 v4000 = [0.2689184571038008, 0.12764685398636047, 0.08109809215837412]
 
 x = np.arange(len(nodes))  # the label locations
-width = 0.125  # the width of the bars
+width = 0.15  # the width of the bars
 
 fig2, ax2 = plt.subplots()
 ax2.grid(zorder=0)
-rects1 = ax2.bar(x - 3 / 2 * width, regular, width, label='Regular traffic', zorder=3)
-rects2 = ax2.bar(x - width / 2, v500, width, label='$V_{p}$ = 500m/s', zorder=3)
-rects3 = ax2.bar(x + width / 2, v1000, width, label='$V_{p}$ = 1000m/s', zorder=3)
-rects4 = ax2.bar(x + 3 / 2 * width, v4000, width, label='$V_{p}$ = 4000m/s', zorder=3)
+rects1 = ax2.bar(x - 3 / 2 * width - 0.02, regular, width, label='Regular traffic', zorder=3)
+rects2 = ax2.bar(x - width / 2 - 0.01, v500, width, label='$V_{p}$ = 500m/s', zorder=3)
+rects3 = ax2.bar(x + width / 2 + 0.01, v1000, width, label='$V_{p}$ = 1000m/s', zorder=3)
+rects4 = ax2.bar(x + 3 / 2 * width + 0.02, v4000, width, label='$V_{p}$ = 4000m/s', zorder=3)
 
 # Add some text for labels, title and custom x-axis tick labels, etc.
 ax2.set_xlabel('Node density (per sq. km.)')
