@@ -57,7 +57,6 @@ import csv
 from progressbarsimple import ProgressBar
 from progress.bar import Bar
 
-
 # turn on/off graphics
 graphics = 0
 
@@ -80,8 +79,6 @@ sf9 = np.array([9, -131.25, -128.25, -127.5])
 sf10 = np.array([10, -132.75, -130.25, -128.75])
 sf11 = np.array([11, -134.5, -132.75, -128.75])
 sf12 = np.array([12, -133.25, -132.25, -132.25])
-
-
 
 
 #
@@ -555,7 +552,6 @@ nodes_burst_trx_ids = []
 global t_e  # event start time
 global myProgressBar
 
-
 global pkts_sent, pkts_gen, time, prev_time, pkts_gen_prev, pkts_sent_prev
 pkts_sent = []
 pkts_gen = []
@@ -570,7 +566,7 @@ evep_y = 100
 d_th = 50  # cut-off distance
 W = 60  # width of window
 
-Up = 500  # event propagation speed
+Up = 4000  # event propagation speed
 BURST_DURATION = 1000000
 
 # event driven traffic
@@ -578,7 +574,6 @@ EVENT_TRAFFIC = True
 
 if not EVENT_TRAFFIC:
     Up = '-'
-
 
 # random.seed(430)
 
@@ -608,28 +603,6 @@ if __name__ == "__main__":
         print("experiment 0 and 1 use 1 frequency only")
         exit(-1)
 
-    # global nodes
-    # global packetsAtBS
-    # global env
-
-    # # maximum number of packets the BS can receive at the same time
-    # global maxBSReceives
-
-    # # max distance: 300m in city, 3000 m outside (5 km Utz experiment)
-    # # also more unit-disc like according to Utz
-    # global bsId
-    # global nrCollisions
-    # global nrReceived
-    # global nrProcessed
-    # global nrLost
-
-    # global Ptx
-    # global gamma
-    # global d0
-    # global var
-    # global Lpld0
-    # global GL
-    # global graphics
     t_e = simtime / 2
     sensi = np.array([sf7, sf8, sf9, sf10, sf11, sf12])
     if experiment in [0, 1, 4, 5]:
@@ -638,8 +611,7 @@ if __name__ == "__main__":
         minsensi = -112.0  # no experiments, so value from datasheet
     elif experiment == 3:
         minsensi = np.amin(sensi)  # Experiment 3 can use any setting, so take minimum
-    # else:
-    #     minsensi = np.amin(sensi)  # Experiment 5 can use any setting, so take minimum
+
     Lpl = Ptx - minsensi
     print("amin", minsensi, "Lpl", Lpl)
     maxDist = d0 * (math.e ** ((Lpl - Lpld0) / (10.0 * gamma)))
@@ -748,7 +720,7 @@ if __name__ == "__main__":
         writer.writerow([str(nrNodes), str(nrCollisions), str(sent), str(energy), str(Up), str(pdr)])
     csv_file.close()
 
-    fname_csv_gen_sen = "genearated_delivered_v=" + str(Up) + "ms" + ".csv"
+    fname_csv_gen_sen = "generated_delivered_v=" + str(Up) + "ms_n=" + str(nrNodes) + ".csv"
     print(fname_csv_gen_sen)
     create_csv_gen_sen = True
     if os.path.isfile(fname_csv_gen_sen):
@@ -764,7 +736,9 @@ if __name__ == "__main__":
             writer = csv.writer(csv_file, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
         for i in range(len(time)):
             writer.writerow([time[i], pkts_gen[i], pkts_sent[i]])
-    csv_file.close()# with open('nodes.txt','w') as nfile:
+    csv_file.close()
+
+    # with open('nodes.txt','w') as nfile:
     #     for n in nodes:
     #         nfile.write("{} {} {}\n".format(n.x, n.y, n.nodeid))
     # with open('basestation.txt', 'w') as bfile:
