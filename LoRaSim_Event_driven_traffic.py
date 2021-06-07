@@ -672,7 +672,7 @@ evep_y = 1500
 d_th = 150  # cut-off distance
 W = 200  # width of window
 
-Up = 4000  # event propagation speed
+Up = 500  # event propagation speed
 BURST_DURATION = 1000
 
 # event driven traffic
