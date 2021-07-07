@@ -118,6 +118,8 @@ def checkcollision(packet):
                             # either this one, the other one, or both
                             for p in c:
                                 p.collided = 1
+                                if p == packet:
+                                    col = 1
                         else:
                             # no timing collision, all fine
                             pass
@@ -237,8 +239,8 @@ def airtime(sf, cr, pl, bw):
 # pulse function δ that defines the event (burst traffic) duration
 # return 1 if the event is happening and 0 if not
 def d(z):
-    if 0 <= z <= BURST_DURATION:
-        # if 0 <= z:
+    # if 0 <= z <= BURST_DURATION:
+    if z >= 0:
         return 1
     else:
         return 0
@@ -324,7 +326,7 @@ class myNode():
         return lamda[0] / 3600000
 
     def theta_helper(self, t):
-        return d(t - t_e - (self.dist_epicenter / Up) )
+        return d(t - t_e - (self.dist_epicenter / Up) * 1000)
 
     def theta(self, t):
         return self.theta_helper(t) * self.delta_n
@@ -422,13 +424,14 @@ class myPacket():
             L0 = Lu - 4.78 * (math.log10(self.bw)) ** 2 + 18.33 * math.log10(self.bw) - 40.94
             # print("L0:", L0)
 
-            Prx = self.txpow - GL - L0
+            # Prx = self.txpow - GL - L0
+            Prx = self.txpow - GL - Lpl
 
             if experiment == 5:
                 # reduce the txpower if there's room left
                 self.txpow = max(2, self.txpow - math.floor(Prx - minsensi))
-                # Prx = self.txpow - GL - Lpl
-                Prx = self.txpow - GL - L0
+                Prx = self.txpow - GL - Lpl
+                # Prx = self.txpow - GL - L0
                 # print('minsesi {} best txpow {}'.format(minsensi, self.txpow))
 
         # transmission range, needs update XXX
@@ -626,6 +629,116 @@ def transmit_event(env, node):
                 myProgressBar.progress(int(env.now))
 
 
+def transmit_event2(env, node):
+    global prev_time, pkts_sent, pkts_gen, pkts_sent_prev, pkts_gen_prev, sumsent, nodes_burst_trx_ids, sumgenpkts
+    global nrReceived, nrLost, nrCollisions, nrProcessed
+    while True:
+
+        p = random.uniform(0, 1)
+        if p < node.theta(env.now) and node.nodeid not in nodes_burst_trx_ids and env.now >= t_e:
+            print("====Burst traffic!====, from node", node.nodeid, "at:", env.now)
+            nodes_burst_trx_ids.append(node.nodeid)
+
+            # time sending and receiving
+            # packet arrives -> add to base station
+            # send(node)
+        else:
+            wtime = random.expovariate(node.get_rate())
+            # if node.nodeid in on_fire_ids or node.nodeid in on_danger_ids:
+                # if node.nodeid in on_fire_ids:
+            if node.nodeid not in nodes_burst_trx_ids:
+
+                # if wtime + env.now >= t_e + BURST_DURATION and env.now < t_e + BURST_DURATION:
+                if wtime + env.now >= t_e:
+                    # if t_e <= env.now <= t_e + BURST_DURATION:
+                    if env.now >= t_e:
+                        # wtime = env.now - t_e #+ BURST_DURATION*3/4
+                        # wtime = env.now - t_e  # + random.uniform(1, BURST_DURATION / 10)
+                        # yield env.timeout(random.uniform(1,BURST_DURATION/10))
+                        # yield env.timeout(random.uniform(0, 150))
+                        yield env.timeout(500)
+                        print("[debug] continue for node", node.nodeid, "till event at:", env.now)
+                        continue
+
+                    else:
+                        # wtime = t_e - env.now #+ BURST_DURATION*3/4
+                        wtime = t_e - env.now  # + random.uniform(1, BURST_DURATION / 10)
+                        print("[debug] wtime=", wtime, "at:", env.now)
+                        yield env.timeout(wtime)
+                        # yield env.timeout(random.uniform(0, 1))
+                        continue
+                else:
+                    print("----DEBUG---- wtime:", wtime, "at:", env.now)
+
+            if node.nodeid in on_fire_ids or node.nodeid in on_danger_ids:
+                if node.nodeid not in nodes_burst_trx_ids:
+                    print('----DEBUG----')
+            yield env.timeout(wtime)
+            # send(node)
+
+        # time sending and receiving
+        # packet arrives -> add to base station
+        node.sent = node.sent + 1
+
+        sumgenpkts = sumgenpkts + 1
+
+        if node in packetsAtBS:
+            print("ERROR: packet already in")
+        else:
+            sensitivity = sensi[node.packet.sf - 7, [125, 250, 500].index(node.packet.bw) + 1]
+            if node.packet.rssi < sensitivity:
+                print("node {}: packet will be lost".format(node.nodeid))
+                node.packet.lost = True
+            else:
+                node.packet.lost = False
+                # adding packet if no collision
+                if checkcollision(node.packet) == 1:
+                    node.packet.collided = 1
+                else:
+                    node.packet.collided = 0
+                packetsAtBS.append(node)
+                node.packet.addTime = env.now
+
+        yield env.timeout(node.packet.rectime)
+
+        if node.packet.lost:
+            # global nrLost
+            nrLost = nrLost + 1
+        if node.packet.collided == 1:
+            # global nrCollisions
+            nrCollisions = nrCollisions + 1
+        if node.packet.collided == 0 and not node.packet.lost:
+            # global nrReceived
+            nrReceived = nrReceived + 1
+        if node.packet.processed == 1:
+            # global nrProcessed
+            nrProcessed = nrProcessed + 1
+
+        # complete packet has been received by base station
+        # can remove it
+        if node in packetsAtBS:
+            packetsAtBS.remove(node)
+            # reset the packet
+        node.packet.collided = 0
+        node.packet.processed = 0
+        node.packet.lost = False
+        # save stats for graphs
+        sumsent = sum(s.sent for s in nodes)
+        if env.now - prev_time >= 500:
+            pkts_gen.append(sumsent - pkts_gen_prev)
+            pkts_sent.append(nrReceived - pkts_sent_prev)
+            time.append(env.now / 1000)
+            prev_time = env.now
+            pkts_gen_prev = sumsent
+            pkts_sent_prev = nrReceived
+
+            if PROG_BAR:
+                myProgressBar.progress(int(env.now))
+
+        print(env.now)
+        # yield env.timeout(100)
+
+
 nodes = []
 packetsAtBS = []
 env = simpy.Environment()
@@ -640,6 +753,8 @@ nrCollisions = 0
 nrReceived = 0
 nrProcessed = 0
 nrLost = 0
+
+sumgenpkts=0
 
 Ptx = 14
 gamma = 2.08
@@ -749,7 +864,8 @@ for i in range(0, nrNodes):
 
     nodes.append(node)
     if EVENT_TRAFFIC:
-        env.process(transmit_event(env, node))
+        # env.process(transmit_event(env, node))
+        env.process(transmit_event2(env, node))
     else:
         env.process(transmit(env, node))
 
