@@ -233,6 +233,9 @@ def airtime(sf, cr, pl, bw):
     # print("sf", sf, " cr", cr, "pl", pl, "bw", bw)
     payloadSymbNB = 8 + max(math.ceil((8.0 * pl - 4.0 * sf + 28 + 16 - 20 * H) / (4.0 * (sf - 2 * DE))) * (cr + 4), 0)
     Tpayload = payloadSymbNB * Tsym
+
+    # print("Airtime:",Tpream + Tpayload)
+
     return Tpream + Tpayload
 
 
@@ -349,6 +352,8 @@ class myPacket():
         self.nodeid = nodeid
         self.txpow = Ptx
 
+        self.airt = 0
+
         # randomize configuration values
         # self.sf = random.choice([12,11,11,10,10,10,10,9,9,9,9,9,9,9,9,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8])
         # self.sf = random.choice([8,9,10,11,12])
@@ -404,6 +409,9 @@ class myPacket():
             # self.sf  = random.choice([8,8,8,8,8,8,8,8,8,8,8,8,9,9,9,9,9,9,10,10,10,10,11,11,12])
 
             at = airtime(self.sf, self.cr, plen, self.bw)
+
+            self.airt = at
+
             if at < minairtime:
                 minairtime = at
                 minsf = self.sf
@@ -630,41 +638,64 @@ def transmit_event(env, node):
 
 
 def transmit_event2(env, node):
-    global prev_time, pkts_sent, pkts_gen, pkts_sent_prev, pkts_gen_prev, sumsent, nodes_burst_trx_ids, sumgenpkts
-    global nrReceived, nrLost, nrCollisions, nrProcessed
+    global prev_time, pkts_sent, pkts_gen, pkts_sent_prev, pkts_gen_prev, sumsent, nodes_burst_trx_ids, sumgenpkts, sum_airt, prev_sum_airt
+    global nrReceived, nrLost, nrCollisions, nrProcessed, busy
+
     while True:
 
         p = random.uniform(0, 1)
         if p < node.theta(env.now) and node.nodeid not in nodes_burst_trx_ids and env.now >= t_e:
             print("====Burst traffic!====, from node", node.nodeid, "at:", env.now)
             nodes_burst_trx_ids.append(node.nodeid)
-
             # time sending and receiving
             # packet arrives -> add to base station
             # send(node)
         else:
+            sumsent = sum(s.sent for s in nodes)
+            if env.now - prev_time >= 500 and not busy:
+                busy = True
+                pkts_gen.append(sumsent - pkts_gen_prev)
+                # pkts_gen.append(sumgenpkts - pkts_gen_prev)
+                pkts_sent.append(nrReceived - pkts_sent_prev)
+                time.append(env.now / 1000)
+                timeg.append(env.now / 1000)
+                times.append((env.now - max(sum_airt)) / 1000)
+                prev_time = env.now
+                pkts_gen_prev = sumsent
+                # pkts_gen_prev = sumgenpkts
+                pkts_sent_prev = nrReceived
+
+                print("time_sent:", env.now - max(sum_airt))
+                print("lag:", max(sum_airt))
+                print("avg. lag:", sum(sum_airt) / len(sum_airt))
+                print(env.now)
+                sum_airt = [0]
+                if PROG_BAR:
+                    myProgressBar.progress(int(env.now))
+                busy = False
+
             wtime = random.expovariate(node.get_rate())
             # if node.nodeid in on_fire_ids or node.nodeid in on_danger_ids:
-                # if node.nodeid in on_fire_ids:
+            # if node.nodeid in on_fire_ids:
             if node.nodeid not in nodes_burst_trx_ids:
 
                 # if wtime + env.now >= t_e + BURST_DURATION and env.now < t_e + BURST_DURATION:
                 if wtime + env.now >= t_e:
                     # if t_e <= env.now <= t_e + BURST_DURATION:
                     if env.now >= t_e:
-                        # wtime = env.now - t_e #+ BURST_DURATION*3/4
-                        # wtime = env.now - t_e  # + random.uniform(1, BURST_DURATION / 10)
-                        # yield env.timeout(random.uniform(1,BURST_DURATION/10))
-                        # yield env.timeout(random.uniform(0, 150))
+
+                        # yield env.timeout(500)
                         yield env.timeout(500)
-                        print("[debug] continue for node", node.nodeid, "till event at:", env.now)
+                        yield env.timeout(random.uniform(0, 1))
+                        # print("[debug] continue for node", node.nodeid, "till event at:", env.now)
                         continue
 
                     else:
                         # wtime = t_e - env.now #+ BURST_DURATION*3/4
                         wtime = t_e - env.now  # + random.uniform(1, BURST_DURATION / 10)
-                        print("[debug] wtime=", wtime, "at:", env.now)
+                        # print("[debug] wtime=", wtime, "at:", env.now)
                         yield env.timeout(wtime)
+                        yield env.timeout(random.uniform(0, 1))
                         # yield env.timeout(random.uniform(0, 1))
                         continue
                 else:
@@ -710,9 +741,13 @@ def transmit_event2(env, node):
         if node.packet.collided == 0 and not node.packet.lost:
             # global nrReceived
             nrReceived = nrReceived + 1
+
+            # print(env.now-node.packet.addTime,"=",node.packet.airt)
+
         if node.packet.processed == 1:
             # global nrProcessed
             nrProcessed = nrProcessed + 1
+            sum_airt.append(node.packet.airt)
 
         # complete packet has been received by base station
         # can remove it
@@ -724,18 +759,29 @@ def transmit_event2(env, node):
         node.packet.lost = False
         # save stats for graphs
         sumsent = sum(s.sent for s in nodes)
-        if env.now - prev_time >= 500:
+        if env.now - prev_time >= 500 and not busy:
+            busy=True
             pkts_gen.append(sumsent - pkts_gen_prev)
+            # pkts_gen.append(sumgenpkts - pkts_gen_prev)
             pkts_sent.append(nrReceived - pkts_sent_prev)
             time.append(env.now / 1000)
+            timeg.append(env.now / 1000)
+            times.append((env.now-max(sum_airt))/1000)
             prev_time = env.now
             pkts_gen_prev = sumsent
+            # pkts_gen_prev = sumgenpkts
             pkts_sent_prev = nrReceived
 
+            print("time_sent:",env.now-max(sum_airt))
+            print("lag:",max(sum_airt))
+            print("avg. lag:", sum(sum_airt)/len(sum_airt))
+            print(env.now)
+            sum_airt=[0]
             if PROG_BAR:
                 myProgressBar.progress(int(env.now))
+            busy=False
 
-        print(env.now)
+        # print(env.now)
         # yield env.timeout(100)
 
 
@@ -754,7 +800,10 @@ nrReceived = 0
 nrProcessed = 0
 nrLost = 0
 
-sumgenpkts=0
+sumgenpkts = 0
+sum_airt=[0]
+prev_sum_airt=0
+busy=False
 
 Ptx = 14
 gamma = 2.08
@@ -773,25 +822,28 @@ nodes_burst_trx_ids = []
 global t_e  # event start time
 global myProgressBar
 
-global pkts_sent, pkts_gen, time, prev_time, pkts_gen_prev, pkts_sent_prev
+global pkts_sent, pkts_gen, timeg, times, prev_time, pkts_gen_prev, pkts_sent_prev
 pkts_sent = []
 pkts_gen = []
 time = []
+timeg = []
+times = []
 prev_time = 0
 pkts_gen_prev = 0
 pkts_sent_prev = 0
 
 # event epicenter
-evep_x = 1500
-evep_y = 1500
+evep_x = 2500
+evep_y = 2500
 d_th = 150  # cut-off distance
 W = 200  # width of window
 
-Up = 500  # event propagation speed
+Up = 4000  # event propagation speed
 BURST_DURATION = 1000
 
 # event driven traffic
 EVENT_TRAFFIC = True
+# EVENT_TRAFFIC = False
 T_MODEL = 'RAISEDCOS'
 # T_MODEL = 'DECAYINGEXP'
 a = 0.005
@@ -875,6 +927,8 @@ for i in range(0, nrNodes):
 env.run(until=simtime)
 
 nodes_burst_trx_ids = set(nodes_burst_trx_ids)
+# pkts_sent.append(pkts_sent.pop(0))
+times, pkts_sent = zip(*sorted(zip(times, pkts_sent)))
 
 # print(stats and save into file
 print("nrCollisions ", nrCollisions)
@@ -949,13 +1003,15 @@ if os.path.isfile(fname_csv_gen_sen):
 else:
     create_csv_gen_sen = True
 with open(fname_csv_gen_sen, mode='a+', newline='') as csv_file:
+    # fieldnames = ['timeg' + str(Up), '#pkts_gen' + str(Up), 'times' + str(Up), '#pkts_sent' + str(Up)]
     fieldnames = ['time' + str(Up), '#pkts_gen' + str(Up), '#pkts_sent' + str(Up)]
     if create_csv_gen_sen:
         writer = csv.writer(csv_file, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
         writer.writerow(fieldnames)
     else:
         writer = csv.writer(csv_file, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-    for i in range(len(time)):
+    for i in range(len(timeg)):
+        # writer.writerow([timeg[i], pkts_gen[i], times[i], pkts_sent[i]])
         writer.writerow([time[i], pkts_gen[i], pkts_sent[i]])
 csv_file.close()
 
