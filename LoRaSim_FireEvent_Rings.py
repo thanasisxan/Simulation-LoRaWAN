@@ -93,7 +93,7 @@ def checkcollision(packet):
     for i in range(0, len(packetsAtBS)):
         if packetsAtBS[i].packet.processed == 1:
             processing = processing + 1
-    if (processing > maxBSReceives):
+    if processing > maxBSReceives:
         # print("too long: {}".format(len(packetsAtBS)))
         packet.processed = 0
     else:
@@ -275,6 +275,7 @@ class myNode():
             if len(nodes) > 0:
                 for index, n in enumerate(nodes):
                     dist = np.sqrt(((abs(n.x - posx)) ** 2) + ((abs(n.y - posy)) ** 2))
+                    # if dist >= 10:
                     if dist >= 10:
                         found = 1
                         self.x = posx
@@ -640,6 +641,7 @@ def transmit_event(env, node):
 def transmit_event2(env, node):
     global prev_time, pkts_sent, pkts_gen, pkts_sent_prev, pkts_gen_prev, sumsent, nodes_burst_trx_ids, sumgenpkts, sum_airt, prev_sum_airt
     global nrReceived, nrLost, nrCollisions, nrProcessed, busy
+    global centroid
 
     while True:
 
@@ -647,6 +649,11 @@ def transmit_event2(env, node):
         if p < node.theta(env.now) and node.nodeid not in nodes_burst_trx_ids and env.now >= t_e:
             print("====Burst traffic!====, from node", node.nodeid, "at:", env.now)
             nodes_burst_trx_ids.append(node.nodeid)
+
+            x = [i.x for i in nodes if i.nodeid in nodes_burst_trx_ids]
+            y = [i.y for i in nodes if i.nodeid in nodes_burst_trx_ids]
+            centroid = (sum(x) / len(x), sum(y) / len(y))
+
             # time sending and receiving
             # packet arrives -> add to base station
             # send(node)
@@ -700,16 +707,20 @@ def transmit_event2(env, node):
             wtime = random.expovariate(node.get_rate())
             # if node.nodeid in on_fire_ids or node.nodeid in on_danger_ids:
             # if node.nodeid in on_fire_ids:
-            if node.nodeid not in nodes_burst_trx_ids:
+            # if node.nodeid not in nodes_burst_trx_ids:
+            if node.nodeid not in nodes_burst_trx_ids and (node.nodeid in on_fire_ids or node.nodeid in on_danger_ids):
+            # if node.nodeid not in nodes_burst_trx_ids and (node.nodeid in on_fire_ids or node.nodeid in on_danger_ids[:len(on_danger_ids)//4]):
 
                 # if wtime + env.now >= t_e + BURST_DURATION and env.now < t_e + BURST_DURATION:
                 if wtime + env.now >= t_e:
                     # if t_e <= env.now <= t_e + BURST_DURATION:
                     if env.now >= t_e:
 
-                        # yield env.timeout(500)
                         yield env.timeout(500)
+                        # yield env.timeout(10)
+
                         yield env.timeout(random.uniform(0, 1))
+
                         # print("[debug] continue for node", node.nodeid, "till event at:", env.now)
                         continue
 
@@ -717,14 +728,17 @@ def transmit_event2(env, node):
                         # wtime = t_e - env.now #+ BURST_DURATION*3/4
                         wtime = t_e - env.now  # + random.uniform(1, BURST_DURATION / 10)
                         # print("[debug] wtime=", wtime, "at:", env.now)
+
                         yield env.timeout(wtime)
+
                         yield env.timeout(random.uniform(0, 1))
+
                         # yield env.timeout(random.uniform(0, 1))
                         continue
                 else:
                     print("----DEBUG---- wtime:", wtime, "at:", env.now)
 
-            if node.nodeid in on_fire_ids or node.nodeid in on_danger_ids:
+            if node.nodeid in on_fire_ids:
                 if node.nodeid not in nodes_burst_trx_ids:
                     print('----DEBUG----')
             yield env.timeout(wtime)
@@ -854,6 +868,8 @@ times = []
 prev_time = 0
 pkts_gen_prev = 0
 pkts_sent_prev = 0
+
+centroid = []
 
 # event epicenter
 evep_x = 3250
