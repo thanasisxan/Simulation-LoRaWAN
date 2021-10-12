@@ -541,116 +541,46 @@ def transmit(env, node):
 
 # transmit event
 def transmit_event(env, node):
-    global prev_time, pkts_sent, pkts_gen, pkts_sent_prev, pkts_gen_prev, sumsent, nodes_burst_trx_ids, sumgenpkts, sum_airt, prev_sum_airt
-    global nrReceived, nrLost, nrCollisions, nrProcessed, busy
-    global centroid
+    # global nrReceived, nrLost, nrCollisions, nrProcessed
+    global prev_time, pkts_sent, pkts_gen, pkts_sent_prev, pkts_gen_prev, sumsent
+    global nrReceived, nrLost, nrCollisions, nrProcessed
 
     while True:
-
         p = random.uniform(0, 1)
-        if p < node.theta(env.now) and node.nodeid not in nodes_burst_trx_ids and env.now >= t_e:
+
+        # if p < node.theta(env.now) and node.nodeid not in nodes_burst_trx_ids:
+        if p < node.theta(env.now):
             print("====Burst traffic!====, from node", node.nodeid, "at:", env.now)
             nodes_burst_trx_ids.append(node.nodeid)
-
-            x = [i.x for i in nodes if i.nodeid in nodes_burst_trx_ids]
-            y = [i.y for i in nodes if i.nodeid in nodes_burst_trx_ids]
-            centroid = (sum(x) / len(x), sum(y) / len(y))
-
-            # time sending and receiving
-            # packet arrives -> add to base station
-            # send(node)
-            sumsent = sum(s.sent for s in nodes)
-            if env.now - prev_time >= 500 and not busy:
-                busy = True
-                pkts_gen.append(sumsent - pkts_gen_prev)
-                # pkts_gen.append(sumgenpkts - pkts_gen_prev)
-                pkts_sent.append(nrReceived - pkts_sent_prev)
-                time.append(env.now / 1000)
-                timeg.append(env.now / 1000)
-                times.append((env.now - max(sum_airt)) / 1000)
-                prev_time = env.now
-                pkts_gen_prev = sumsent
-                # pkts_gen_prev = sumgenpkts
-                pkts_sent_prev = nrReceived
-
-                print("time_sent:", env.now - max(sum_airt))
-                print("lag:", max(sum_airt))
-                print("avg. lag:", sum(sum_airt) / len(sum_airt))
-                print(env.now)
-                sum_airt = [0]
-                if PROG_BAR:
-                    myProgressBar.progress(int(env.now))
-                busy = False
-
         else:
-            sumsent = sum(s.sent for s in nodes)
-            if env.now - prev_time >= 500 and not busy:
-                busy = True
-                pkts_gen.append(sumsent - pkts_gen_prev)
-                # pkts_gen.append(sumgenpkts - pkts_gen_prev)
-                pkts_sent.append(nrReceived - pkts_sent_prev)
-                time.append(env.now / 1000)
-                timeg.append(env.now / 1000)
-                times.append((env.now - max(sum_airt)) / 1000)
-                prev_time = env.now
-                pkts_gen_prev = sumsent
-                # pkts_gen_prev = sumgenpkts
-                pkts_sent_prev = nrReceived
-
-                print("time_sent:", env.now - max(sum_airt))
-                print("lag:", max(sum_airt))
-                print("avg. lag:", sum(sum_airt) / len(sum_airt))
-                print(env.now)
-                sum_airt = [0]
-                if PROG_BAR:
-                    myProgressBar.progress(int(env.now))
-                busy = False
-
             wtime = random.expovariate(node.get_rate())
-            # if node.nodeid in on_fire_ids or node.nodeid in on_danger_ids:
-            # if node.nodeid in on_fire_ids:
-            # if node.nodeid not in nodes_burst_trx_ids:
-            if node.nodeid not in nodes_burst_trx_ids and (node.nodeid in on_fire_ids or node.nodeid in on_danger_ids):
-                # if node.nodeid not in nodes_burst_trx_ids and (node.nodeid in on_fire_ids or node.nodeid in on_danger_ids[:len(on_danger_ids)//4]):
 
-                # if wtime + env.now >= t_e + BURST_DURATION and env.now < t_e + BURST_DURATION:
-                if wtime + env.now >= t_e:
-                    # if t_e <= env.now <= t_e + BURST_DURATION:
-                    if env.now >= t_e:
+            print("[DEBUG] wtime non burst traffic node:", wtime)
 
-                        yield env.timeout(500)
-                        # yield env.timeout(10)
-
-                        yield env.timeout(random.uniform(0, 1))
-
-                        # print("[debug] continue for node", node.nodeid, "till event at:", env.now)
-                        continue
-
-                    else:
-                        # wtime = t_e - env.now #+ BURST_DURATION*3/4
-                        wtime = t_e - env.now  # + random.uniform(1, BURST_DURATION / 10)
-                        # print("[debug] wtime=", wtime, "at:", env.now)
-
-                        yield env.timeout(wtime)
-
-                        yield env.timeout(random.uniform(0, 1))
-
-                        # yield env.timeout(random.uniform(0, 1))
-                        continue
-                else:
-                    print("----DEBUG---- wtime:", wtime, "at:", env.now)
-
-            if node.nodeid in on_fire_ids:
+            # fix bug for nodes affected by the effect that stay on idle during the event because of low arrival rate
+            if node.nodeid in on_fire_ids or node.nodeid in on_danger_ids:
                 if node.nodeid not in nodes_burst_trx_ids:
-                    print('----DEBUG----')
+
+                    if wtime + env.now >= t_e + BURST_DURATION and env.now < t_e + BURST_DURATION:
+                        if t_e <= env.now <= t_e + BURST_DURATION:
+                            # wtime = env.now - t_e #+ BURST_DURATION*3/4
+                            # wtime = env.now - t_e  # + random.uniform(1, BURST_DURATION / 10)
+                            # yield env.timeout(random.uniform(1,BURST_DURATION/10))
+                            continue
+                        else:
+                            # wtime = t_e - env.now #+ BURST_DURATION*3/4
+                            wtime = t_e - env.now  # + random.uniform(1, BURST_DURATION / 10)
+                            yield env.timeout(wtime)
+                            continue
+                    # nodes_burst_trx_ids.append(node.nodeid)
+                    #     continue
+
+            # print("----normal traffic----, wait:", wtime, "at:", env.now)
             yield env.timeout(wtime)
-            # send(node)
 
         # time sending and receiving
         # packet arrives -> add to base station
         node.sent = node.sent + 1
-
-        sumgenpkts = sumgenpkts + 1
 
         if node in packetsAtBS:
             print("ERROR: packet already in")
@@ -680,13 +610,9 @@ def transmit_event(env, node):
         if node.packet.collided == 0 and not node.packet.lost:
             # global nrReceived
             nrReceived = nrReceived + 1
-
-            # print(env.now-node.packet.addTime,"=",node.packet.airt)
-
         if node.packet.processed == 1:
             # global nrProcessed
             nrProcessed = nrProcessed + 1
-            sum_airt.append(node.packet.airt)
 
         # complete packet has been received by base station
         # can remove it
@@ -696,32 +622,23 @@ def transmit_event(env, node):
         node.packet.collided = 0
         node.packet.processed = 0
         node.packet.lost = False
-        # save stats for graphs
+
+        # global prev_time, pkts_sent, pkts_gen, pkts_sent_prev, pkts_gen_prev, sumsent
         sumsent = sum(s.sent for s in nodes)
-        if env.now - prev_time >= 500 and not busy:
-            busy = True
+
+        if env.now - prev_time >= 100:
             pkts_gen.append(sumsent - pkts_gen_prev)
-            # pkts_gen.append(sumgenpkts - pkts_gen_prev)
             pkts_sent.append(nrReceived - pkts_sent_prev)
             time.append(env.now / 1000)
-            timeg.append(env.now / 1000)
-            times.append((env.now - max(sum_airt)) / 1000)
             prev_time = env.now
             pkts_gen_prev = sumsent
-            # pkts_gen_prev = sumgenpkts
             pkts_sent_prev = nrReceived
 
-            print("time_sent:", env.now - max(sum_airt))
-            print("lag:", max(sum_airt))
-            print("avg. lag:", sum(sum_airt) / len(sum_airt))
-            print(env.now)
-            sum_airt = [0]
             if PROG_BAR:
                 myProgressBar.progress(int(env.now))
-            busy = False
 
 
-def transmit_event_fire_rings(env, node):
+def transmit_event2(env, node):
     global prev_time, pkts_sent, pkts_gen, pkts_sent_prev, pkts_gen_prev, sumsent, nodes_burst_trx_ids, sumgenpkts, sum_airt, prev_sum_airt
     global nrReceived, nrLost, nrCollisions, nrProcessed, busy
     global centroid
@@ -1039,7 +956,7 @@ for i in range(0, nrNodes):
     nodes.append(node)
     if EVENT_TRAFFIC:
         # env.process(transmit_event(env, node))
-        env.process(transmit_event_fire_rings(env, node))
+        env.process(transmit_event2(env, node))
     else:
         env.process(transmit(env, node))
 
