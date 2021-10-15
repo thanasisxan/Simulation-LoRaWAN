@@ -401,7 +401,9 @@ class myPacket():
             # print("Prx:", Prx)
             self.cr = 1
             self.bw = 125
-            self.sf = random.choice([7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 11, 12])
+            # self.sf = random.choice([7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 11, 12])
+            self.sf = random.choice([7, 8, 9, 10, 11, 12])
+
             # self.sf = random.choice([12,11,11,10,10,10,10,9,9,9,9,9,9,9,9,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8])
             # self.sf = random.choice([8,9,10,11,12])
             # self.sf = random.choice([8,8,8,9,9,9,10,10,11,12])
@@ -792,7 +794,7 @@ def transmit_event_fire_rings(env, node):
             # if node.nodeid in on_fire_ids:
             # if node.nodeid not in nodes_burst_trx_ids:
             if node.nodeid not in nodes_burst_trx_ids and (node.nodeid in on_fire_ids or node.nodeid in on_danger_ids):
-            # if node.nodeid not in nodes_burst_trx_ids and (node.nodeid in on_fire_ids or node.nodeid in on_danger_ids[:len(on_danger_ids)//4]):
+                # if node.nodeid not in nodes_burst_trx_ids and (node.nodeid in on_fire_ids or node.nodeid in on_danger_ids[:len(on_danger_ids)//4]):
 
                 # if wtime + env.now >= t_e + BURST_DURATION and env.now < t_e + BURST_DURATION:
                 if wtime + env.now >= t_e:
@@ -880,26 +882,26 @@ def transmit_event_fire_rings(env, node):
         # save stats for graphs
         sumsent = sum(s.sent for s in nodes)
         if env.now - prev_time >= 500 and not busy:
-            busy=True
+            busy = True
             pkts_gen.append(sumsent - pkts_gen_prev)
             # pkts_gen.append(sumgenpkts - pkts_gen_prev)
             pkts_sent.append(nrReceived - pkts_sent_prev)
             time.append(env.now / 1000)
             timeg.append(env.now / 1000)
-            times.append((env.now-max(sum_airt))/1000)
+            times.append((env.now - max(sum_airt)) / 1000)
             prev_time = env.now
             pkts_gen_prev = sumsent
             # pkts_gen_prev = sumgenpkts
             pkts_sent_prev = nrReceived
 
-            print("time_sent:",env.now-max(sum_airt))
-            print("lag:",max(sum_airt))
-            print("avg. lag:", sum(sum_airt)/len(sum_airt))
+            print("time_sent:", env.now - max(sum_airt))
+            print("lag:", max(sum_airt))
+            print("avg. lag:", sum(sum_airt) / len(sum_airt))
             print(env.now)
-            sum_airt=[0]
+            sum_airt = [0]
             if PROG_BAR:
                 myProgressBar.progress(int(env.now))
-            busy=False
+            busy = False
 
         # print(env.now)
         # yield env.timeout(100)
@@ -921,9 +923,9 @@ nrProcessed = 0
 nrLost = 0
 
 sumgenpkts = 0
-sum_airt=[0]
-prev_sum_airt=0
-busy=False
+sum_airt = [0]
+prev_sum_airt = 0
+busy = False
 
 Ptx = 14
 gamma = 2.08
@@ -1038,11 +1040,27 @@ for i in range(0, nrNodes):
     node = myNode(i, bsId, avgSendTime, payloadlen)
 
     nodes.append(node)
+    # if EVENT_TRAFFIC:
+    #     # env.process(transmit_event(env, node))
+    #     env.process(transmit_event_fire_rings(env, node))
+    # else:
+    #     env.process(transmit(env, node))
+
+index = 0
+step = 0
+ring = [[] for _ in range(50)]
+while index < 50:
+    for n in nodes:
+        if step <= n.dist_epicenter < step + 70:
+            ring[index].append(n.nodeid)
+    step = step + 70
+    index = index + 1
+
+for n in nodes:
     if EVENT_TRAFFIC:
-        # env.process(transmit_event(env, node))
-        env.process(transmit_event_fire_rings(env, node))
+        env.process(transmit_event_fire_rings(env, n))
     else:
-        env.process(transmit(env, node))
+        env.process(transmit(env, n))
 
 # prepare show
 
