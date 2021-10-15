@@ -276,7 +276,7 @@ class myNode():
                 for index, n in enumerate(nodes):
                     dist = np.sqrt(((abs(n.x - posx)) ** 2) + ((abs(n.y - posy)) ** 2))
                     # if dist >= 10:
-                    if dist >= 10:
+                    if dist >= 20:
                         found = 1
                         self.x = posx
                         self.y = posy
@@ -960,7 +960,7 @@ evep_y = 3250
 d_th = 150  # cut-off distance
 W = 200  # width of window
 
-Up = 500  # event propagation speed
+Up = 6.4  # event propagation speed
 BURST_DURATION = 1000
 
 # event driven traffic
@@ -1004,7 +1004,8 @@ else:
     exit(-1)
 
 if EVENT_TRAFFIC:
-    t_e = simtime / 2
+    # t_e = simtime / 2
+    t_e = simtime / 20
     print("Time of event:", t_e)
     print("Event duration:", BURST_DURATION)
 
