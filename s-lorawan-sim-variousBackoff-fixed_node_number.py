@@ -367,7 +367,7 @@ print("Packets created: ", total_packets_created)
 print("Packets sent:", total_packets_sent)
 # print("Lora nodes:", lora_nodes_created)
 # print("λ:", L)
-print("Packet dorp rate:", dropped_packets / total_packets_created)
+print("Packet drop rate:", dropped_packets / total_packets_created)
 print("Trx attempts:", trx_attempts)
 # print("Sucessful transmission prob.:", total_packets_sent / trx_attempts)
 

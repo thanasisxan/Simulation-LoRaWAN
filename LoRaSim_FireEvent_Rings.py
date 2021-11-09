@@ -61,6 +61,9 @@ import winsound
 # do the full collision check
 full_collision = True
 
+# progressbar flag
+PROG_BAR = False
+
 # experiments:
 # 0: packet with longest airtime, aloha-style experiment
 # 0: one with 3 frequencies, 1 with 1 frequency
@@ -77,6 +80,130 @@ sf9 = np.array([9, -131.25, -128.25, -127.5])
 sf10 = np.array([10, -132.75, -130.25, -128.75])
 sf11 = np.array([11, -134.5, -132.75, -128.75])
 sf12 = np.array([12, -133.25, -132.25, -132.25])
+
+Ptx = 14
+gamma = 2.08
+d0 = 1000.0
+var = 0  # variance ignored for now
+Lpld0 = 127.41
+GL = 0
+sensi = np.array([sf7, sf8, sf9, sf10, sf11, sf12])
+minsensi = -132.5
+bsId = 1
+
+global myProgressBar
+global t_e  # event start time
+global pkts_sent, pkts_gen, timeg, times, prev_time, pkts_gen_prev, pkts_sent_prev
+global ring
+
+# event epicenter
+evep_x = 3250
+evep_y = 3250
+d_th = 150  # cut-off distance
+# W = 200  # width of window
+W = 550  # width of window
+
+Up = 6.4  # event propagation speed
+# Up = 4000  # event propagation speed
+BURST_DURATION = 1000
+ring_width = 50
+
+# event driven traffic
+# EVENT_TRAFFIC = True
+EVENT_TRAFFIC = False
+# FIRE_RINGS = True
+FIRE_RINGS = False
+T_MODEL = 'RAISEDCOS'
+# T_MODEL = 'DECAYINGEXP'
+a = 0.005
+
+# get arguments
+if len(sys.argv) >= 6:
+    nrNodes = int(sys.argv[1])
+    avgSendTime = int(sys.argv[2])
+    experiment = int(sys.argv[3])
+    simtime = int(sys.argv[4])
+    payloadlen = int(sys.argv[5])
+    if len(sys.argv) > 6:
+        full_collision = bool(int(sys.argv[6]))
+    print("Nodes:", nrNodes)
+    print("AvgSendTime (exp. distributed):", avgSendTime)
+    print("Experiment: ", experiment)
+    print("Simtime: ", simtime)
+    print("payload size: ", payloadlen)
+    print("Full Collision: ", full_collision)
+
+    if PROG_BAR:
+        myProgressBar = ProgressBar(nElements=100, nIterations=simtime)
+
+else:
+    print("usage: ./loraDir nrNodes avgSendTime experimentNr simtime payloadsize [full_collision]")
+    print("experiment 0 and 1 use 1 frequency only")
+    exit(-1)
+
+on_fire_ids = []
+on_danger_ids = []
+normal_ids = []
+nodes_burst_trx_ids = []
+
+pkts_sent = []
+pkts_gen = []
+time = []
+timeg = []
+times = []
+prev_time = 0
+pkts_gen_prev = 0
+pkts_sent_prev = 0
+
+centroid = []
+
+if EVENT_TRAFFIC:
+    # t_e = simtime / 2
+    t_e = simtime / 20
+    print("Time of event:", t_e)
+    print("Event duration:", BURST_DURATION)
+
+if experiment in [0, 1, 4]:
+    minsensi = sensi[5, 2]  # 5th row is SF12, 2nd column is BW125
+elif experiment == 2:
+    minsensi = -112.0  # no experiments, so value from datasheet
+elif experiment == 3:
+    minsensi = np.amin(sensi)  # Experiment 3 can use any setting, so take minimum
+# elif experiment == 5:
+#     minsensi = np.amin(sensi)  # Experiment 5 can use any setting, so take minimum
+
+Lpl = Ptx - minsensi
+print("amin", minsensi, "Lpl", Lpl)
+maxDist = d0 * (math.e ** ((Lpl - Lpld0) / (10.0 * gamma)))
+print("maxDist:", maxDist)
+
+# base station placement
+bsx = maxDist + 10
+bsy = maxDist + 10
+xmax = bsx + maxDist + 20
+ymax = bsy + maxDist + 20
+
+nodes = []
+packetsAtBS = []
+env = simpy.Environment()
+
+# maximum number of packets the BS can receive at the same time
+maxBSReceives = 8
+
+# max distance: 300m in city, 3000 m outside (5 km Utz experiment)
+# also more unit-disc like according to Utz
+nrCollisions = 0
+nrReceived = 0
+nrProcessed = 0
+nrLost = 0
+
+sumgenpkts = 0
+sum_airt = [0]
+prev_sum_airt = 0
+busy = False
+
+if not EVENT_TRAFFIC:
+    Up = '-'
 
 
 #
@@ -160,7 +287,7 @@ def frequencyCollision(p1, p2):
 #
 def sfCollision(p1, p2):
     if p1.sf == p2.sf:
-        # print("collision sf node {} and node {}".format(p1.nodeid, p2.nodeid))
+        print("collision sf node {} and node {}".format(p1.nodeid, p2.nodeid))
         # p2 may have been lost too, will be marked by other checks
         return True
     # print("no sf collision")
@@ -260,7 +387,7 @@ class myNode():
         self.x = 0
         self.y = 0
 
-        # this is very complex prodecure for placing nodes
+        # this is very complex procedure for placing nodes
         # and ensure minimum distance between each pair of nodes
         found = 0
         rounds = 0
@@ -349,6 +476,7 @@ class myPacket():
         global var
         global Lpld0
         global GL
+        global ring
 
         self.nodeid = nodeid
         self.txpow = Ptx
@@ -361,7 +489,7 @@ class myPacket():
         # self.sf = random.choice([8,8,8,9,9,9,10,10,11,12])
         # self.sf = random.choice([12,11,11,10,10,10,9,9,9,9,8,8,8,8,8])
         # self.sf  = random.choice([8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,9,9,9,9,9,9,9,9,9,10,10,10,10,10,11,11,11,12])
-        #        self.sf  = random.choice([8,8,8,8,8,8,8,8,8,8,8,8,9,9,9,9,9,9,10,10,10,10,11,11,12])
+        # self.sf  = random.choice([8,8,8,8,8,8,8,8,8,8,8,8,9,9,9,9,9,9,10,10,10,10,11,11,12])
         self.cr = random.randint(1, 4)
         # self.bw = random.choice([125, 250, 500])
 
@@ -401,9 +529,13 @@ class myPacket():
             # print("Prx:", Prx)
             self.cr = 1
             self.bw = 125
-            # self.sf = random.choice([7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 11, 12])
-            self.sf = random.choice([7, 8, 9, 10, 11, 12])
 
+            if not FIRE_RINGS:
+                self.sf = random.choice([7, 8, 9, 10, 11, 12])
+            else:
+                self.sf = random.choice([7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 11, 12])
+
+            # self.sf = random.choice([7, 8, 9, 10, 11, 12])
             # self.sf = random.choice([12,11,11,10,10,10,10,9,9,9,9,9,9,9,9,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8])
             # self.sf = random.choice([8,9,10,11,12])
             # self.sf = random.choice([8,8,8,9,9,9,10,10,11,12])
@@ -457,9 +589,12 @@ class myPacket():
         # for certain experiments override these and
         # choose some random frequences
 
-        self.freq = random.choice(
-            [868100000, 868300000, 868500000, 868700000, 868900000, 869100000, 869300000, 869500000])
+        # todo: optimal channel distribution in rings
         # self.freq = random.choice([866500000,866700000,866900000,867100000,867300000,867500000,867700000,867900000,868100000, 868300000, 868500000,868700000,868900000,869100000,869300000,869500000])
+
+        # self.freq = random.choice([868100000, 868300000, 868500000, 868700000, 868900000, 869100000, 869300000, 869500000])
+        self.freq = random.choice(
+            [868100000, 868300000, 868500000, 867100000, 867300000, 867500000, 867700000, 867900000])
 
         # print("frequency", self.freq, "symTime ", self.symTime)
         # print("bw", self.bw, "sf", self.sf, "cr", self.cr, "rssi", self.rssi)
@@ -529,7 +664,7 @@ def transmit(env, node):
         global prev_time, pkts_sent, pkts_gen, pkts_sent_prev, pkts_gen_prev
         sumsent = sum(s.sent for s in nodes)
 
-        if env.now - prev_time >= 100:
+        if env.now - prev_time >= 500:
             pkts_gen.append(sumsent - pkts_gen_prev)
             pkts_sent.append(nrReceived - pkts_sent_prev)
             time.append(env.now / 1000)
@@ -554,10 +689,6 @@ def transmit_event(env, node):
             print("====Burst traffic!====, from node", node.nodeid, "at:", env.now)
             nodes_burst_trx_ids.append(node.nodeid)
 
-            x = [i.x for i in nodes if i.nodeid in nodes_burst_trx_ids]
-            y = [i.y for i in nodes if i.nodeid in nodes_burst_trx_ids]
-            centroid = (sum(x) / len(x), sum(y) / len(y))
-
             # time sending and receiving
             # packet arrives -> add to base station
             # send(node)
@@ -620,7 +751,7 @@ def transmit_event(env, node):
                     # if t_e <= env.now <= t_e + BURST_DURATION:
                     if env.now >= t_e:
 
-                        yield env.timeout(500)
+                        yield env.timeout(400)
                         # yield env.timeout(10)
 
                         yield env.timeout(random.uniform(0, 1))
@@ -637,7 +768,6 @@ def transmit_event(env, node):
 
                         yield env.timeout(random.uniform(0, 1))
 
-                        # yield env.timeout(random.uniform(0, 1))
                         continue
                 else:
                     print("----DEBUG---- wtime:", wtime, "at:", env.now)
@@ -721,6 +851,8 @@ def transmit_event(env, node):
             if PROG_BAR:
                 myProgressBar.progress(int(env.now))
             busy = False
+
+        # yield env.timeout(100)
 
 
 def transmit_event_fire_rings(env, node):
@@ -735,10 +867,6 @@ def transmit_event_fire_rings(env, node):
             print("====Burst traffic!====, from node", node.nodeid, "at:", env.now)
             nodes_burst_trx_ids.append(node.nodeid)
 
-            x = [i.x for i in nodes if i.nodeid in nodes_burst_trx_ids]
-            y = [i.y for i in nodes if i.nodeid in nodes_burst_trx_ids]
-            centroid = (sum(x) / len(x), sum(y) / len(y))
-
             # time sending and receiving
             # packet arrives -> add to base station
             # send(node)
@@ -801,7 +929,7 @@ def transmit_event_fire_rings(env, node):
                     # if t_e <= env.now <= t_e + BURST_DURATION:
                     if env.now >= t_e:
 
-                        yield env.timeout(500)
+                        yield env.timeout(400)
                         # yield env.timeout(10)
 
                         yield env.timeout(random.uniform(0, 1))
@@ -818,7 +946,6 @@ def transmit_event_fire_rings(env, node):
 
                         yield env.timeout(random.uniform(0, 1))
 
-                        # yield env.timeout(random.uniform(0, 1))
                         continue
                 else:
                     print("----DEBUG---- wtime:", wtime, "at:", env.now)
@@ -860,6 +987,13 @@ def transmit_event_fire_rings(env, node):
         if node.packet.collided == 1:
             # global nrCollisions
             nrCollisions = nrCollisions + 1
+
+            # for DEBUG purposes
+            # for i in range(50):
+            #     if node.nodeid in ring[i]:
+            #         print("-*-*- node ", node.nodeid, "in ring group:", i, " with packet sf:", node.packet.sf)
+            #         print("--**-- Collision in ring group:", i)
+
         if node.packet.collided == 0 and not node.packet.lost:
             # global nrReceived
             nrReceived = nrReceived + 1
@@ -903,137 +1037,10 @@ def transmit_event_fire_rings(env, node):
                 myProgressBar.progress(int(env.now))
             busy = False
 
-        # print(env.now)
         # yield env.timeout(100)
 
 
-nodes = []
-packetsAtBS = []
-env = simpy.Environment()
-
-# maximum number of packets the BS can receive at the same time
-maxBSReceives = 8
-
-# max distance: 300m in city, 3000 m outside (5 km Utz experiment)
-# also more unit-disc like according to Utz
-bsId = 1
-nrCollisions = 0
-nrReceived = 0
-nrProcessed = 0
-nrLost = 0
-
-sumgenpkts = 0
-sum_airt = [0]
-prev_sum_airt = 0
-busy = False
-
-Ptx = 14
-gamma = 2.08
-d0 = 1000.0
-var = 0  # variance ignored for now
-Lpld0 = 127.41
-GL = 0
-
-#
-# "main" program
-#
-on_fire_ids = []
-on_danger_ids = []
-normal_ids = []
-nodes_burst_trx_ids = []
-global t_e  # event start time
-global myProgressBar
-
-global pkts_sent, pkts_gen, timeg, times, prev_time, pkts_gen_prev, pkts_sent_prev
-pkts_sent = []
-pkts_gen = []
-time = []
-timeg = []
-times = []
-prev_time = 0
-pkts_gen_prev = 0
-pkts_sent_prev = 0
-
-centroid = []
-
-# event epicenter
-evep_x = 3250
-evep_y = 3250
-d_th = 150  # cut-off distance
-W = 200  # width of window
-
-Up = 6.4  # event propagation speed
-BURST_DURATION = 1000
-
-# event driven traffic
-EVENT_TRAFFIC = True
-# EVENT_TRAFFIC = False
-T_MODEL = 'RAISEDCOS'
-# T_MODEL = 'DECAYINGEXP'
-a = 0.005
-
-# progressbar flag
-PROG_BAR = False
-
-if not EVENT_TRAFFIC:
-    Up = '-'
-
 # random.seed(0)
-
-
-# get arguments
-if len(sys.argv) >= 6:
-    nrNodes = int(sys.argv[1])
-    avgSendTime = int(sys.argv[2])
-    experiment = int(sys.argv[3])
-    simtime = int(sys.argv[4])
-    payloadlen = int(sys.argv[5])
-    if len(sys.argv) > 6:
-        full_collision = bool(int(sys.argv[6]))
-    print("Nodes:", nrNodes)
-    print("AvgSendTime (exp. distributed):", avgSendTime)
-    print("Experiment: ", experiment)
-    print("Simtime: ", simtime)
-    print("payload size: ", payloadlen)
-    print("Full Collision: ", full_collision)
-
-    if PROG_BAR:
-        myProgressBar = ProgressBar(nElements=100, nIterations=simtime)
-
-else:
-    print("usage: ./loraDir nrNodes avgSendTime experimentNr simtime payloadsize [full_collision]")
-    print("experiment 0 and 1 use 1 frequency only")
-    exit(-1)
-
-if EVENT_TRAFFIC:
-    # t_e = simtime / 2
-    t_e = simtime / 20
-    print("Time of event:", t_e)
-    print("Event duration:", BURST_DURATION)
-
-sensi = np.array([sf7, sf8, sf9, sf10, sf11, sf12])
-minsensi = -132.5
-
-if experiment in [0, 1, 4]:
-    minsensi = sensi[5, 2]  # 5th row is SF12, 2nd column is BW125
-elif experiment == 2:
-    minsensi = -112.0  # no experiments, so value from datasheet
-elif experiment == 3:
-    minsensi = np.amin(sensi)  # Experiment 3 can use any setting, so take minimum
-# elif experiment == 5:
-#     minsensi = np.amin(sensi)  # Experiment 5 can use any setting, so take minimum
-
-Lpl = Ptx - minsensi
-print("amin", minsensi, "Lpl", Lpl)
-maxDist = d0 * (math.e ** ((Lpl - Lpld0) / (10.0 * gamma)))
-print("maxDist:", maxDist)
-
-# base station placement
-bsx = maxDist + 10
-bsy = maxDist + 10
-xmax = bsx + maxDist + 20
-ymax = bsy + maxDist + 20
-
 for i in range(0, nrNodes):
     # myNode takes period (in ms), base station id packetlen (in Bytes)
     # 1000000 = 16 min
@@ -1046,19 +1053,72 @@ for i in range(0, nrNodes):
     # else:
     #     env.process(transmit(env, node))
 
-index = 0
-step = 0
-ring = [[] for _ in range(50)]
-while index < 50:
-    for n in nodes:
-        if step <= n.dist_epicenter < step + 70:
-            ring[index].append(n.nodeid)
-    step = step + 70
-    index = index + 1
+if FIRE_RINGS:
+    step = 0
+    ring = [[] for _ in range(50)]
+    for i in range(50):
+
+        # create ring group
+        for n in nodes:
+            if step <= n.dist_epicenter < step + ring_width:
+                ring[i].append(n.nodeid)
+        step = step + ring_width
+        temp_ring_node_obj = []
+
+        # sort nodes in ring group according to their distance from the event epicenter
+        for n in nodes:
+            if n.nodeid in ring[i]:
+                temp_ring_node_obj.append(n)
+        temp_ring_node_obj.sort(key=lambda x: x.dist_epicenter)
+        ring[i] = []
+        for t in temp_ring_node_obj:
+            print(t.dist_epicenter)
+            ring[i].append(t.nodeid)
+        print("---------")
+
+    # assign sf in round robin fashion in each ring
+    sf_list = [7, 8, 9, 10, 11, 12]
+    c = 0
+    for i in range(len(ring)):
+        for j in range(len(ring[i])):
+            if c == len(sf_list):
+                c = 0
+            nodes[ring[i][j]].packet.sf = sf_list[c]
+            c = c + 1
+
+    # assign channels in round robin fashion in each ring
+    # channel_list = [868100000, 868300000, 868500000, 867100000, 867300000, 867500000, 867700000, 867900000]
+    # c = 0
+    # for i in range(len(ring)):
+    #     for j in range(len(ring[i])):
+    #         if c == len(channel_list):
+    #             c = 0
+    #         nodes[ring[i][j]].packet.freq = channel_list[c]
+    #         c = c + 1
+
+    # c1 = 0
+    # c2 = 0
+    # sf_list = [7, 8, 9, 10, 11, 12]
+    # channel_list = [868100000, 868300000, 868500000, 867100000, 867300000, 867500000, 867700000, 867900000]
+    # for i in range(len(ring)):
+    #     for j in range(len(ring[i])):
+    #         if c1 == len(sf_list):
+    #             c1 = 0
+    #             c2 = c2 + 1
+    #         if c2 == len(channel_list):
+    #             c2 = 0
+    #         nodes[ring[i][j]].packet.sf = sf_list[c1]
+    #         nodes[ring[i][j]].packet.freq = channel_list[c2]
+    #         c1 = c1 + 1
+    #     c1 = 0
+    #     c2 = 0
 
 for n in nodes:
     if EVENT_TRAFFIC:
-        env.process(transmit_event_fire_rings(env, n))
+        if FIRE_RINGS:
+            env.process(transmit_event_fire_rings(env, n))
+        else:
+            env.process(transmit_event(env, n))
     else:
         env.process(transmit(env, n))
 
@@ -1080,11 +1140,13 @@ TX = [22, 22, 22, 23,  # RFO/PA0: -2..1
       24, 24, 24, 25, 25, 25, 25, 26, 31, 32, 34, 35, 44,  # PA_BOOST/PA1: 2..14
       82, 85, 90,  # PA_BOOST/PA1: 15..17
       105, 115, 125]  # PA_BOOST/PA1+PA2: 18..20
-# mA = 90    # current draw for TX = 17 dBm
+mA = 90  # current draw for TX = 17 dBm
 V = 3.0  # voltage XXX
 sent = sum(n.sent for n in nodes)
-# energy = sum(node.packet.rectime * TX[int(node.packet.txpow) + 2] * V * node.sent for node in nodes) / 1e6
 
+# for node in nodes:
+#     energy = sum(node.packet.rectime * TX[int(node.packet.txpow) + 2] * V * node.sent for node in nodes) / 1e6
+#
 energy = 0
 print("energy (in J): ", energy)
 print("sent packets: ", sent)
@@ -1111,10 +1173,11 @@ fname = "exp" + str(experiment) + ".dat"
 print(fname)
 if os.path.isfile(fname):
     res = "\n" + str(nrNodes) + " " + str(nrCollisions) + " " + str(sent) + " " + str(energy) + " " + str(
-        Up) + " " + str(pdr) + " " + str(der2)
+        Up) + " " + str(pdr) + " " + str(der2) + " " + str(FIRE_RINGS)
 else:
-    res = "#nrNodes nrCollisions nrTransmissions OverallEnergy Up PDR DER2\n" + str(nrNodes) + " " + str(
-        nrCollisions) + " " + str(sent) + " " + str(energy) + " " + str(Up) + " " + str(pdr) + " " + str(der2)
+    res = "#nrNodes nrCollisions nrTransmissions OverallEnergy Up PDR DER2 FireRings\n" + str(nrNodes) + " " + str(
+        nrCollisions) + " " + str(sent) + " " + str(energy) + " " + str(Up) + " " + str(pdr) + " " + str(
+        der2) + " " + str(FIRE_RINGS)
 with open(fname, "a") as myfile:
     myfile.write(res)
 myfile.close()
@@ -1127,13 +1190,14 @@ if os.path.isfile(fname_csv):
 else:
     create_csv = True
 with open(fname_csv, mode='a+', newline='') as csv_file:
-    fieldnames = ['#nrNodes', 'nrCollisions', 'nrTransmissions', 'OverallEnergy', 'Up', 'PDR']
+    fieldnames = ['#nrNodes', 'nrCollisions', 'nrTransmissions', 'OverallEnergy', 'Up', 'PDR', 'DER2', 'FireRings']
     if create_csv:
         writer = csv.writer(csv_file, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
         writer.writerow(fieldnames)
     else:
         writer = csv.writer(csv_file, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-    writer.writerow([str(nrNodes), str(nrCollisions), str(sent), str(energy), str(Up), str(pdr)])
+    writer.writerow(
+        [str(nrNodes), str(nrCollisions), str(sent), str(energy), str(Up), str(pdr), str(der2), str(FIRE_RINGS)])
 csv_file.close()
 
 fname_csv_gen_sen = "generated_delivered_v=" + str(Up) + "ms_n=" + str(nrNodes) + ".csv"
