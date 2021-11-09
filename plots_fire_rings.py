@@ -48,18 +48,22 @@ x = 1  # the label locations
 width = 0.005  # the width of the bars
 
 fig2, ax2 = plt.subplots()
-ax2.grid(zorder=0,which='both',axis='y')
-ax2.set_yticks(ticks=np.arange(0, max(regular)+1, 0.10))
+ax2.grid(zorder=0, which='minor', axis='y', alpha=0.3)
+ax2.grid(zorder=0, which='major', axis='y', alpha=0.8)
 ax2.minorticks_on()
-ax2.set_yticks(np.arange(0, max(regular)+1, 0.010),minor=True)
-ax2.yaxis.set_tick_params(labelsize=20)
+
+ax2.set_yticks(ticks=np.arange(0, max(regular) + 1, 0.10))
+ax2.set_yticks(np.arange(0, max(regular) + 1, 0.010), minor=True)
+
+ax2.yaxis.set_tick_params(labelsize=12)
 # ax2.set_yticklabels()
 
 rects1 = ax2.bar(x - 3 / 2 * width - 0.002, regular, width, label='Regular traffic', zorder=3)
-rects2 = ax2.bar(x - 1 / 2 * width - 0.001, ring_groups_event_sf_channel, width,
-                 label='$V_{p}$ = 6.4 m/s (ring groups - sf & channel)', zorder=3)
-rects3 = ax2.bar(x + 1 / 2 * width + 0.00, ring_groups_event_sf_only, width,
+rects2 = ax2.bar(x + 1 / 2 * width + 0.00, ring_groups_event_sf_only, width,
                  label='$V_{p}$ = 6.4 m/s (ring groups - sf only)', zorder=3)
+rects3 = ax2.bar(x - 1 / 2 * width - 0.001, ring_groups_event_sf_channel, width,
+                 label='$V_{p}$ = 6.4 m/s (ring groups - sf & channel)', zorder=3)
+
 rects4 = ax2.bar(x + 3 / 2 * width + 0.001, no_ring_groups_event, width,
                  label='$V_{p}$ = 6.4 m/s (no ring groups - LoRaWAN)', zorder=3)
 
