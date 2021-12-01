@@ -109,10 +109,10 @@ BURST_DURATION = 1000
 ring_width = 50
 
 # event driven traffic
-EVENT_TRAFFIC = True
-# EVENT_TRAFFIC = False
-FIRE_RINGS = True
-# FIRE_RINGS = False
+# EVENT_TRAFFIC = True
+EVENT_TRAFFIC = False
+# FIRE_RINGS = True
+FIRE_RINGS = False
 T_MODEL = 'RAISEDCOS'
 # T_MODEL = 'DECAYINGEXP'
 a = 0.005
@@ -803,11 +803,13 @@ def transmit_event(env, node):
                 packetsAtBS.append(node)
                 node.packet.addTime = env.now
 
+
+        # yield env.timeout(node.packet.rectime)
+
+        print("env.now:", env.now, "wait for next timeslot")
+        yield wait_trx_ts(env, 1)
+        print("transmitting at:", env.now)
         yield env.timeout(node.packet.rectime)
-        TIMESLOT = 2000
-        w_nexttimeslot = TIMESLOT - (env.now - ((env.now // TIMESLOT) * TIMESLOT))
-        print("env.now:", env.now, "wait for next timeslot:", w_nexttimeslot)
-        print("theoretically transmit at:", env.now + w_nexttimeslot)
 
         if node.packet.lost:
             # global nrLost
@@ -867,6 +869,10 @@ def transmit_event(env, node):
 
         # yield env.timeout(100)
 
+def wait_trx_ts(env: simpy.Environment,t: int):
+    TIMESLOT = 2000
+    w_nexttimeslot = TIMESLOT - (env.now - ((env.now // TIMESLOT) * TIMESLOT))
+    yield env.timeout(w_nexttimeslot)
 
 # random.seed(0)
 for i in range(0, nrNodes):
