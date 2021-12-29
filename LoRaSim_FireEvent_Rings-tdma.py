@@ -976,11 +976,12 @@ if FIRE_RINGS_ch_sf or FIRE_RINGS_tdma_simple or FIRE_RINGS_TDMA_multi:
             # apply clustering to channel-groups according to Jenks-Fischer algorithm
             if len(ring[i]) <= 8:
                 df[i]['channel'] = pd.cut(df[i]['toa'], bins=breaks[i],
-                                          labels=[_ for _ in range(len(ring[i])-1)], include_lowest=True)
+                                          labels=[_ for _ in range(len(ring[i]) - 1)], include_lowest=True)
             else:
                 df[i]['channel'] = pd.cut(df[i]['toa'], bins=breaks[i],
                                           labels=[_ for _ in range(8)], include_lowest=True)
 
+        prev_ring_w = [_ for _ in len(ring)]
         for i in range(len(ring)):
             for j in range(df[i]['channel'].max() + 1):
                 df[i].loc[df[i]['channel'] == j, 'order'] = [_ for _ in
@@ -990,9 +991,12 @@ if FIRE_RINGS_ch_sf or FIRE_RINGS_tdma_simple or FIRE_RINGS_TDMA_multi:
 
                 df[i].loc[df[i]['channel'] == j, 'ch_tdma_dur'] = (df[i].loc[df[i]['channel'] == j][
                                                                        'order'].max() + 1) * (
-                                                                              df[i].loc[df[i]['channel'] == j][
-                                                                                  'toa'].max() + 10)
-
+                                                                          df[i].loc[df[i]['channel'] == j][
+                                                                              'toa'].max() + 10)
+            if i != 0:
+                prev_ring_w[i] = df[i - 1]['ch_tdma_dur'].max() + prev_ring_w[i - 1]
+            else:
+                prev_ring_w[i] = 0
 
 for n in nodes:
     if EVENT_TRAFFIC:
