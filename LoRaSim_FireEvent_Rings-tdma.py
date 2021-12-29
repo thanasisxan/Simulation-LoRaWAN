@@ -116,8 +116,8 @@ EVENT_TRAFFIC = True
 FIRE_RINGS_ch_sf = False
 FIRE_RINGS_tdma_simple = True
 # FIRE_RINGS_tdma_simple = False
-# FIRE_RINGS_TDMA_multi = True
-FIRE_RINGS_TDMA_multi = False
+FIRE_RINGS_TDMA_multi = True
+# FIRE_RINGS_TDMA_multi = False
 
 
 T_MODEL = 'RAISEDCOS'
@@ -976,10 +976,22 @@ if FIRE_RINGS_ch_sf or FIRE_RINGS_tdma_simple or FIRE_RINGS_TDMA_multi:
             # apply clustering to channel-groups according to Jenks-Fischer algorithm
             if len(ring[i]) <= 8:
                 df[i]['channel'] = pd.cut(df[i]['toa'], bins=breaks[i],
-                                          labels=[_ for _ in range(1, len(ring[i]))], include_lowest=True)
+                                          labels=[_ for _ in range(len(ring[i])-1)], include_lowest=True)
             else:
                 df[i]['channel'] = pd.cut(df[i]['toa'], bins=breaks[i],
-                                          labels=[_ for _ in range(1, 8 + 1)], include_lowest=True)
+                                          labels=[_ for _ in range(8)], include_lowest=True)
+
+        for i in range(len(ring)):
+            for j in range(df[i]['channel'].max() + 1):
+                df[i].loc[df[i]['channel'] == j, 'order'] = [_ for _ in
+                                                             range(df[i].loc[df[i]['channel'] == j].__len__())]
+
+                df[i].loc[df[i]['channel'] == j, 'timeslot'] = df[i].loc[df[i]['channel'] == j]['toa'].max() + 10
+
+                df[i].loc[df[i]['channel'] == j, 'ch_tdma_dur'] = (df[i].loc[df[i]['channel'] == j][
+                                                                       'order'].max() + 1) * (
+                                                                              df[i].loc[df[i]['channel'] == j][
+                                                                                  'toa'].max() + 10)
 
 
 for n in nodes:
