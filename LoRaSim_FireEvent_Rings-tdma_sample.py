@@ -61,9 +61,6 @@ import pandas as pd
 import jenkspy
 from jenkspy import JenksNaturalBreaks
 
-# do the full collision check
-full_collision = True
-
 # progressbar flag
 PROG_BAR = False
 
@@ -110,8 +107,8 @@ Up = 6.4  # event propagation speed
 ring_width = 50
 
 # event driven traffic
-# EVENT_TRAFFIC = True
-EVENT_TRAFFIC = False
+EVENT_TRAFFIC = True
+# EVENT_TRAFFIC = False
 FIRE_RINGS_ch_sf = True
 # FIRE_RINGS_ch_sf = False
 # FIRE_RINGS_tdma_simple = True
@@ -124,34 +121,30 @@ T_MODEL = 'RAISEDCOS'
 # T_MODEL = 'DECAYINGEXP'
 a = 0.005
 
+nrNodes = 13741
+avgSendTime = None
+experiment = 5
+simtime = 600000
+payloadlen = 100
+
+# do the full collision check
+full_collision = True
+
 # get arguments
-if len(sys.argv) >= 6:
-    nrNodes = int(sys.argv[1])
-    avgSendTime = int(sys.argv[2])
-    experiment = int(sys.argv[3])
-    simtime = int(sys.argv[4])
-    payloadlen = int(sys.argv[5])
-    if len(sys.argv) > 6:
-        full_collision = bool(int(sys.argv[6]))
-    print("Nodes:", nrNodes)
-    # print("AvgSendTime (exp. distributed):", avgSendTime)
-    # print("Experiment: ", experiment)
-    print("Simtime: ", simtime)
-    print("payload size: ", payloadlen)
-    print("Full Collision: ", full_collision)
+print("Nodes:", nrNodes)
+# print("AvgSendTime (exp. distributed):", avgSendTime)
+# print("Experiment: ", experiment)
+print("Simtime: ", simtime)
+print("payload size: ", payloadlen)
+print("Full Collision: ", full_collision)
 
-    print("\nEVENT_TRAFFIC", EVENT_TRAFFIC)
-    print("FIRE_RINGS_ch_sf", FIRE_RINGS_ch_sf)
-    print("FIRE_RINGS_tdma_simple", FIRE_RINGS_tdma_simple)
-    print("FIRE_RINGS_TDMA_multi", FIRE_RINGS_TDMA_multi, "\n")
+print("\nEVENT_TRAFFIC", EVENT_TRAFFIC)
+print("FIRE_RINGS_ch_sf", FIRE_RINGS_ch_sf)
+print("FIRE_RINGS_tdma_simple", FIRE_RINGS_tdma_simple)
+print("FIRE_RINGS_TDMA_multi", FIRE_RINGS_TDMA_multi, "\n")
 
-    if PROG_BAR:
-        myProgressBar = ProgressBar(nElements=100, nIterations=simtime)
-
-else:
-    print("usage: ./loraDir nrNodes avgSendTime experimentNr simtime payloadsize [full_collision]")
-    print("experiment 0 and 1 use 1 frequency only")
-    exit(-1)
+if PROG_BAR:
+    myProgressBar = ProgressBar(nElements=100, nIterations=simtime)
 
 on_fire_ids = []
 on_danger_ids = []
@@ -785,6 +778,8 @@ def transmit_event(env, node):
 
         sumgenpkts = sumgenpkts + 1
 
+        print("starting transmission at:", env.now)
+
         if node in packetsAtBS:
             print("ERROR: packet already in")
         else:
@@ -900,6 +895,7 @@ def wait_trx_ts_MULTI(env: simpy.Environment, nid: int):
 
         return env.timeout(w_time_tdma_multi)
     else:
+        print("-----=NO RING GROUP=-----")
         return env.timeout(simtime)
 
 
@@ -913,7 +909,7 @@ for i in range(0, nrNodes):
 
 if FIRE_RINGS_ch_sf or FIRE_RINGS_tdma_simple or FIRE_RINGS_TDMA_multi:
     step = 0
-    RING_COUNT = 50
+    RING_COUNT = 60
     ring = [[] for _ in range(RING_COUNT)]
     for i in range(RING_COUNT):
 
@@ -997,7 +993,7 @@ if FIRE_RINGS_ch_sf or FIRE_RINGS_tdma_simple or FIRE_RINGS_TDMA_multi:
             if len(ring[i]) >= 9:
                 breaks[i].extend(jenkspy.jenks_breaks(df[i]['toa'], nb_class=8))
             else:
-                breaks[i].extend(jenkspy.jenks_breaks(df[i]['toa'], nb_class=len(ring[i]) - 1))
+                breaks[i].extend(jenkspy.jenks_breaks(df[i]['toa'], nb_class=len(ring[i])-1))
 
             # fix identical breaks bug
             for b in range(len(breaks[i])):
@@ -1028,7 +1024,7 @@ if FIRE_RINGS_ch_sf or FIRE_RINGS_tdma_simple or FIRE_RINGS_TDMA_multi:
                                                                           df[i].loc[df[i]['channel'] == j][
                                                                               'toa'].max() + 10)
             if i != 0:
-                prev_ring_w[i] = df[i - 1]['ch_tdma_dur'].max() + prev_ring_w[i - 1]
+                prev_ring_w[i] = df[i - 1]['ch_tdma_dur'].max() + prev_ring_w[i - 1] + 100 + random.randint(0,500)
             else:
                 prev_ring_w[i] = 0
 
