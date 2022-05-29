@@ -104,7 +104,8 @@ d_th = 150  # cut-off distance
 W = 1000  # width of window
 
 Up = 6.4  # event propagation speed
-ring_width = 50
+RING_WIDTH = 50
+RING_COUNT = 60
 
 # event driven traffic
 EVENT_TRAFFIC = True
@@ -121,11 +122,14 @@ T_MODEL = 'RAISEDCOS'
 # T_MODEL = 'DECAYINGEXP'
 a = 0.005
 
-nrNodes = 13741
+# nrNodes = 13741
+nrNodes = 5700
+# nrNodes = 2200
 avgSendTime = None
 experiment = 5
-simtime = 600000
-payloadlen = 100
+# simtime = 600000
+simtime = 60000
+payloadlen = 20
 
 # do the full collision check
 full_collision = True
@@ -197,7 +201,7 @@ maxBSReceives = 8
 # max distance: 300m in city, 3000 m outside (5 km Utz experiment)
 # also more unit-disc like according to Utz
 nrCollisions = 0
-nrReceived = 0
+nrReceived: int = 0
 nrProcessed = 0
 nrLost = 0
 
@@ -541,9 +545,10 @@ class LoraPacket:
             # else:
             #     self.sf = random.choice([7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 11, 12])
 
-            self.sf = random.choice([7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 11, 12])
+            # self.sf = random.choice([7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 11, 12])
 
-            # self.sf = random.choice([7, 8, 9, 10, 11, 12])
+            self.sf = random.choice([7, 8, 9, 10, 11, 12])
+            # self.sf = 7
             # self.sf = random.choice([12,11,11,10,10,10,10,9,9,9,9,9,9,9,9,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8])
             # self.sf = random.choice([8,9,10,11,12])
             # self.sf = random.choice([8,8,8,9,9,9,10,10,11,12])
@@ -892,7 +897,7 @@ def wait_trx_ts_MULTI(env: simpy.Environment, nid: int):
             w_time_tdma_multi = order * timeslot
         else:
             w_time_tdma_multi = order * timeslot + w_prev_ring_multi
-
+        print("-waiting for...", w_time_tdma_multi)
         return env.timeout(w_time_tdma_multi)
     else:
         print("-----=NO RING GROUP=-----")
@@ -909,15 +914,14 @@ for i in range(0, nrNodes):
 
 if FIRE_RINGS_ch_sf or FIRE_RINGS_tdma_simple or FIRE_RINGS_TDMA_multi:
     step = 0
-    RING_COUNT = 60
     ring = [[] for _ in range(RING_COUNT)]
     for i in range(RING_COUNT):
 
         # create ring group
         for n in nodes:
-            if step <= n.dist_epicenter < step + ring_width:
+            if step <= n.dist_epicenter < step + RING_WIDTH:
                 ring[i].append(n.nodeid)
-        step = step + ring_width
+        step = step + RING_WIDTH
         temp_ring_node_obj = []
 
         # sort nodes in ring group according to their distance from the event epicenter
@@ -954,7 +958,7 @@ if FIRE_RINGS_ch_sf or FIRE_RINGS_tdma_simple or FIRE_RINGS_TDMA_multi:
         #         nodes[ring[i][j]].packet.freq = channel_list[c]
         #         c = c + 1
 
-        # assign both channels & sf in round robin fashion
+        # assign both channels & sf in round-robin fashion
         c1 = 0
         c2 = 0
         sf_list = [7, 8, 9, 10, 11, 12]
@@ -990,26 +994,37 @@ if FIRE_RINGS_ch_sf or FIRE_RINGS_tdma_simple or FIRE_RINGS_TDMA_multi:
 
             del df_tmp
 
+            # if len(ring[i]) >= 9:
+            #     breaks[i].extend(jenkspy.jenks_breaks(df[i]['toa'], nb_class=8))
+            # else:
+            #     breaks[i].extend(jenkspy.jenks_breaks(df[i]['toa'], nb_class=len(ring[i])-1))
+            no_breaks = False
             if len(ring[i]) >= 9:
                 breaks[i].extend(jenkspy.jenks_breaks(df[i]['toa'], nb_class=8))
+            elif len(ring[i]) > 3:
+                breaks[i].extend(jenkspy.jenks_breaks(df[i]['toa'], nb_class=len(ring[i]) - 1))
             else:
-                breaks[i].extend(jenkspy.jenks_breaks(df[i]['toa'], nb_class=len(ring[i])-1))
+                no_breaks = True
+                # breaks[i].extend(jenkspy.jenks_breaks(df[i]['toa'], nb_class=2))
 
             # fix identical breaks bug
-            for b in range(len(breaks[i])):
-                breaks[i][b] = breaks[i][b] + random.random() * 0.001
+            if not no_breaks:
+                for b in range(len(breaks[i])):
+                    breaks[i][b] = breaks[i][b] + random.random() * 0.001
 
-            breaks[i].sort()
-            breaks[i].pop(0)
-            breaks[i].insert(0, 0)
+                breaks[i].sort()
+                breaks[i].pop(0)
+                breaks[i].insert(0, 0)
 
-            # apply clustering to channel-groups according to Jenks-Fischer algorithm
-            if len(ring[i]) <= 8:
-                df[i]['channel'] = pd.cut(df[i]['toa'], bins=breaks[i],
-                                          labels=[_ for _ in range(len(ring[i]) - 1)], include_lowest=True)
+                # apply clustering to channel-groups according to Jenks-Fischer algorithm
+                if len(ring[i]) <= 8:
+                    df[i]['channel'] = pd.cut(df[i]['toa'], bins=breaks[i],
+                                              labels=[_ for _ in range(len(ring[i]) - 1)], include_lowest=True)
+                else:
+                    df[i]['channel'] = pd.cut(df[i]['toa'], bins=breaks[i],
+                                              labels=[_ for _ in range(8)], include_lowest=True)
             else:
-                df[i]['channel'] = pd.cut(df[i]['toa'], bins=breaks[i],
-                                          labels=[_ for _ in range(8)], include_lowest=True)
+                df[i]['channel'] = np.random.randint(0, 7)
 
         prev_ring_w = [_ for _ in range(len(ring))]
         for i in range(len(ring)):
@@ -1024,7 +1039,8 @@ if FIRE_RINGS_ch_sf or FIRE_RINGS_tdma_simple or FIRE_RINGS_TDMA_multi:
                                                                           df[i].loc[df[i]['channel'] == j][
                                                                               'toa'].max() + 10)
             if i != 0:
-                prev_ring_w[i] = df[i - 1]['ch_tdma_dur'].max() + prev_ring_w[i - 1] + 100 + random.randint(0,500)
+                prev_ring_w[i] = df[i - 1]['ch_tdma_dur'].max() + prev_ring_w[i - 1] + random.randint(0,
+                                                                                                      500)  # + 100 + random.randint(0, 500)
             else:
                 prev_ring_w[i] = 0
 
@@ -1072,11 +1088,14 @@ print("received packets: ", nrReceived)
 print("processed packets: ", nrProcessed)
 print("lost packets: ", nrLost)
 
+
 # data extraction rate
 der = (sent - nrCollisions) / float(sent)
 print("DER:", der)
 der2 = nrReceived / float(sent)
 print("DER method 2:", der2)
+thr = nrReceived / (simtime / 1000)
+print("Throughput: ", thr)
 
 # pdr = nrReceived / float(sent)
 pdr = max(pkts_sent) / max(pkts_gen)
